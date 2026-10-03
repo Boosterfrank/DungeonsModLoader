@@ -1,7 +1,7 @@
 <UserControl x:Class="DungeonsModLoader.App.Views.Pages.ProfilesPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <!-- DataContext: ProfilesViewModel. Profiles arrive in milestone 4. -->
+  <!-- DataContext: ProfilesViewModel. Profiles are coming soon. -->
   <UserControl.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
@@ -24,7 +24,7 @@
     <!-- Empty state -->
     <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
       <Path Style="{StaticResource EmptyState.Icon}" Data="{StaticResource Icon.Profiles}" />
-      <TextBlock Style="{StaticResource EmptyState.Headline}" Text="Profiles arrive in milestone 4" />
+      <TextBlock Style="{StaticResource EmptyState.Headline}" Text="Profiles are coming soon" />
       <Button Style="{DynamicResource Button.Secondary}"
               Content="New profile"
               IsEnabled="False"

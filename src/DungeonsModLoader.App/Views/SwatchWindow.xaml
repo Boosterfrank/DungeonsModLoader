@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:DungeonsModLoader.App.ViewModels"
+        xmlns:controls="clr-namespace:DungeonsModLoader.App.Controls"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SwatchViewModel, IsDesignTimeCreatable=False}"
         Title="{Binding WindowTitle}"
@@ -261,15 +262,15 @@
 
           <TextBlock Text="Inputs" Style="{StaticResource Swatch.GroupLabel}" />
           <!--
-            TODO(integrator): Tag="..." on the three inputs below is a stand-in for the watermark attached property
+            Watermarks come from the TextBoxHelper.Placeholder attached property (Controls/TextBoxHelper.cs).
             controls:TextBoxHelper.Placeholder="..." (xmlns:controls="clr-namespace:DungeonsModLoader.App.Controls"),
             which is created by the theme work and is not available in this worktree yet.
           -->
           <WrapPanel>
-            <TextBox Tag="Display name" Width="220" Margin="0,0,12,12" VerticalAlignment="Center" />
+            <TextBox controls:TextBoxHelper.Placeholder="Display name" Width="220" Margin="0,0,12,12" VerticalAlignment="Center" />
             <TextBox Text="SecondSkinLayer" Width="220" Margin="0,0,12,12" VerticalAlignment="Center" />
-            <TextBox Style="{DynamicResource TextBox.Search}" Tag="Search mods..." Width="260" Margin="0,0,12,12" VerticalAlignment="Center" />
-            <PasswordBox Tag="API key" Width="220" Margin="0,0,12,12" VerticalAlignment="Center" />
+            <TextBox Style="{DynamicResource TextBox.Search}" controls:TextBoxHelper.Placeholder="Search mods..." Width="260" Margin="0,0,12,12" VerticalAlignment="Center" />
+            <PasswordBox controls:TextBoxHelper.Placeholder="API key" Width="220" Margin="0,0,12,12" VerticalAlignment="Center" />
             <ComboBox ItemsSource="{Binding ComboItems}" SelectedIndex="0" Width="180" Margin="0,0,12,12" VerticalAlignment="Center" />
           </WrapPanel>
           <WrapPanel>
