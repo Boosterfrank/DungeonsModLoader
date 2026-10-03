@@ -38,6 +38,28 @@
         <ResourceDictionary Source="Shell/ShellStyles.xaml" />
         <ResourceDictionary Source="Shell/PageTemplates.xaml" />
       </ResourceDictionary.MergedDictionaries>
+
+      <!-- Play button: disabled (muted by the template) while the process monitor reports the game as running. -->
+      <Style x:Key="Shell.PlayButton" TargetType="Button" BasedOn="{StaticResource Button.Play}">
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding IsGameRunning}" Value="True">
+            <Setter Property="IsEnabled" Value="False" />
+            <Setter Property="ToolTip" Value="The game is running" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
+
+      <!-- "PLAY" normally, "RUNNING" while the game is up. -->
+      <Style x:Key="Shell.PlayLabel" TargetType="TextBlock">
+        <Setter Property="Text" Value="PLAY" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding IsGameRunning}" Value="True">
+            <Setter Property="Text" Value="RUNNING" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
     </ResourceDictionary>
   </Window.Resources>
 
@@ -119,7 +141,7 @@
 
         <!-- Bottom: the one primary action, always visible -->
         <StackPanel DockPanel.Dock="Bottom" Margin="16,16,16,16">
-          <Button Style="{DynamicResource Button.Play}"
+          <Button Style="{StaticResource Shell.PlayButton}"
                   Command="{Binding PlayCommand}"
                   HorizontalAlignment="Stretch"
                   AutomationProperties.Name="Play">
@@ -130,12 +152,12 @@
                     Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                     VerticalAlignment="Center"
                     Margin="0,0,10,0" />
-              <TextBlock Text="PLAY" VerticalAlignment="Center" />
+              <TextBlock Style="{StaticResource Shell.PlayLabel}" />
             </StackPanel>
           </Button>
           <TextBlock Style="{StaticResource Text.Caption}"
                      HorizontalAlignment="Center"
-                     Margin="0,8,0,0"><Run Text="{x:Static core:AppInfo.GameDisplayName}" /><Run Text="  ·  Steam" /></TextBlock>
+                     Margin="0,8,0,0"><Run Text="{x:Static core:AppInfo.GameDisplayName}" /><Run Text="  ·  " /><Run Text="{Binding GameSourceLabel, Mode=OneWay}" /></TextBlock>
         </StackPanel>
 
         <!-- Top: logo + navigation -->
