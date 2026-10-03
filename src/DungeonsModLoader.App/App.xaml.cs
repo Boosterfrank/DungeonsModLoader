@@ -3,9 +3,15 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
 using DungeonsModLoader.App.Hosting;
+using DungeonsModLoader.App.Services;
 using DungeonsModLoader.App.Views;
 using DungeonsModLoader.App.Views.Dialogs;
+using DungeonsModLoader.App.Views.Setup;
 using DungeonsModLoader.Core;
+using DungeonsModLoader.Core.Game;
+using DungeonsModLoader.Core.Mods;
+using DungeonsModLoader.Core.Permissions;
+using DungeonsModLoader.Core.Settings;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -47,7 +53,10 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        ShutdownMode = ShutdownMode.OnMainWindowClose;
+
+        // Explicit until the main window is up: the setup wizard and any startup dialog would otherwise become
+        // the "main window" and closing them would end the app.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         // Hooked before anything else so even a failure in the next few lines ends in the crash dialog.
         RegisterGlobalExceptionHandlers();
@@ -91,11 +100,104 @@ public partial class App : Application
         await _host.StartAsync();
 
         var openSwatch = e.Args.Any(a => string.Equals(a, SwatchSwitch, StringComparison.OrdinalIgnoreCase));
-        Window window = openSwatch
-            ? _host.Services.GetRequiredService<SwatchWindow>()
-            : _host.Services.GetRequiredService<MainWindow>();
+        if (openSwatch)
+        {
+            // Design review tool: no settings, no game folder, no wizard.
+            ShowMainWindow(_host.Services.GetRequiredService<SwatchWindow>());
+            return;
+        }
 
+        if (!await PrepareGameAsync(_host.Services))
+        {
+            _log.Information("First-run setup was cancelled; closing the app");
+            Shutdown(0);
+            return;
+        }
+
+        ShowMainWindow(_host.Services.GetRequiredService<MainWindow>());
+    }
+
+    /// <summary>
+    /// Loads the settings and makes sure a game installation is configured: runs the first-run wizard when there is
+    /// none (or setup never completed), otherwise points the game context at the stored installation and prepares
+    /// the mod store. Returns false only when the user left the wizard without finishing it.
+    /// </summary>
+    private async Task<bool> PrepareGameAsync(IServiceProvider services)
+    {
+        var settings = services.GetRequiredService<ISettingsStore>();
+        await settings.LoadAsync();
+
+        var installation = settings.Current.ToGameInstallation();
+        if (!settings.Current.FirstRunCompleted || installation is null)
+        {
+            _log.Information(
+                "Running first-run setup (first run completed: {FirstRunCompleted}, stored game root usable: {HasInstallation})",
+                settings.Current.FirstRunCompleted,
+                installation is not null);
+
+            var setup = services.GetRequiredService<SetupWindow>();
+            return setup.ShowDialog() == true;
+        }
+
+        _log.Information("Using the stored {Source} installation at {Root}", installation.Source, installation.Root);
+        services.GetRequiredService<IGameContext>().Set(installation);
+        await InitializeModStoreAsync(services, installation);
+        return true;
+    }
+
+    /// <summary>
+    /// Prepares the mod store for <paramref name="installation"/>. Access denied offers the one-time permission fix
+    /// and retries once; any other failure is logged and the app continues (the Installed page reports it).
+    /// </summary>
+    private async Task InitializeModStoreAsync(IServiceProvider services, GameInstallation installation)
+    {
+        var mods = services.GetRequiredService<IModService>();
+        try
+        {
+            await mods.InitializeAsync();
+        }
+        catch (ModAccessDeniedException denied)
+        {
+            _log.Warning(denied, "Access denied while preparing the mod folders at {Path}", denied.Path);
+            var dialogs = services.GetRequiredService<IDialogService>();
+            var fix = await dialogs.ConfirmAsync(
+                "Permission needed",
+                $"Windows did not allow changes in {denied.Path}. Grant yourself modify rights on the mod folders? (one-time, asks for administrator approval)",
+                "Fix permissions");
+            if (!fix)
+            {
+                _log.Information("Permission fix declined; continuing without a ready mod store");
+                return;
+            }
+
+            try
+            {
+                var fixer = services.GetRequiredService<IPermissionFixer>();
+                if (await fixer.GrantModifyAccessAsync(installation))
+                {
+                    await mods.InitializeAsync();
+                    _log.Information("Mod store ready after the permission fix");
+                }
+                else
+                {
+                    _log.Information("Permission fix cancelled at the elevation prompt");
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "The mod store could not be prepared after the permission fix");
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "The mod store could not be prepared for {Root}", installation.Root);
+        }
+    }
+
+    private void ShowMainWindow(Window window)
+    {
         MainWindow = window;
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
         window.Show();
         _mainWindowShown = true;
         _log.Debug("Main window shown: {Window}", window.GetType().Name);

@@ -1,0 +1,366 @@
+<Window x:Class="DungeonsModLoader.App.Views.Setup.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:setup="clr-namespace:DungeonsModLoader.App.ViewModels.Setup"
+        xmlns:core="clr-namespace:DungeonsModLoader.Core;assembly=DungeonsModLoader.Core"
+        Title="{Binding WindowTitle}"
+        Width="820" Height="600" MinWidth="760" MinHeight="540"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="SingleBorderWindow"
+        AllowsTransparency="False"
+        ResizeMode="CanResize"
+        ShowInTaskbar="True"
+        Background="{StaticResource Brush.Window.Background}"
+        FontFamily="{StaticResource Font.Body}"
+        FontSize="{StaticResource FontSize.Body}"
+        Foreground="{StaticResource Brush.Text.Primary}"
+        Typography.StandardLigatures="False"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Loaded="OnLoaded"
+        Closing="OnClosing"
+        Closed="OnClosed">
+
+  <!--
+    First-run setup wizard. Same custom chrome as MainWindow (40px caption band, our own caption buttons,
+    WindowChromeHelper for maximized bounds and snap layouts). DataContext: SetupViewModel.
+  -->
+  <WindowChrome.WindowChrome>
+    <WindowChrome CaptionHeight="{StaticResource Size.TitleBar.Height}"
+                  ResizeBorderThickness="6"
+                  GlassFrameThickness="0"
+                  CornerRadius="0"
+                  UseAeroCaptionButtons="False"
+                  NonClientFrameEdges="None" />
+  </WindowChrome.WindowChrome>
+
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="pack://application:,,,/Views/Shell/ShellStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+
+      <!-- Folder-with-tab glyph (16x14, even-odd so it draws as an outline). -->
+      <Geometry x:Key="Setup.Icon.Folder">M0,1 H6 L8,3 H16 V14 H0 Z M1.5,5 V12.5 H14.5 V5 Z</Geometry>
+
+      <!-- ============================ Step list (left column) ============================ -->
+      <!-- Like NavItem: 44px row, accent bar + PanelAlt fill when current; a green check replaces the number when completed. -->
+      <DataTemplate DataType="{x:Type setup:SetupStepItem}">
+        <Grid Height="44" Background="Transparent">
+          <Border x:Name="Selected" Background="{StaticResource Brush.Bg.PanelAlt}" Opacity="0" />
+          <Rectangle x:Name="Bar" Width="3" HorizontalAlignment="Left" Fill="{StaticResource Brush.Accent}" Opacity="0" />
+          <StackPanel Orientation="Horizontal" Margin="16,0" VerticalAlignment="Center">
+            <Grid Width="22" Height="22" VerticalAlignment="Center">
+              <Ellipse x:Name="Ring" Stroke="{StaticResource Brush.Border.Strong}" StrokeThickness="1" Fill="{StaticResource Brush.Bg.Input}" />
+              <TextBlock x:Name="Number" Text="{Binding Number}"
+                         FontFamily="{StaticResource Font.Display}" FontSize="{StaticResource FontSize.Small}" FontWeight="SemiBold"
+                         Foreground="{StaticResource Brush.Text.Muted}"
+                         HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0" />
+              <Path x:Name="Check" Data="{StaticResource Geometry.Check}" Width="11" Height="11" Stretch="Uniform"
+                    Stroke="{StaticResource Brush.Success}" StrokeThickness="2"
+                    StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                    Visibility="Collapsed" />
+            </Grid>
+            <TextBlock x:Name="Label" Text="{Binding Title}"
+                       FontFamily="{StaticResource Font.Display}" FontSize="{StaticResource FontSize.Nav}" FontWeight="Medium"
+                       Foreground="{StaticResource Brush.Text.Secondary}"
+                       VerticalAlignment="Center" Margin="12,0,0,0" />
+          </StackPanel>
+        </Grid>
+        <DataTemplate.Triggers>
+          <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+            <Setter TargetName="Selected" Property="Opacity" Value="1" />
+            <Setter TargetName="Bar" Property="Opacity" Value="1" />
+            <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource Brush.Accent}" />
+            <Setter TargetName="Ring" Property="Fill" Value="{StaticResource Brush.Accent.Faint}" />
+            <Setter TargetName="Number" Property="Foreground" Value="{StaticResource Brush.Accent.Light}" />
+            <Setter TargetName="Label" Property="Foreground" Value="{StaticResource Brush.Text.Primary}" />
+          </DataTrigger>
+          <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+            <Setter TargetName="Number" Property="Visibility" Value="Collapsed" />
+            <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+            <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource Brush.Success}" />
+            <Setter TargetName="Ring" Property="Fill" Value="{StaticResource Brush.Success.Faint}" />
+            <Setter TargetName="Label" Property="Foreground" Value="{StaticResource Brush.Text.Primary}" />
+          </DataTrigger>
+        </DataTemplate.Triggers>
+      </DataTemplate>
+
+      <!-- ============================ Install candidate card (step 1) ============================ -->
+      <!-- RadioButton drawn as a Card: radio dot + content; accent border when selected, cyan when keyboard-focused. -->
+      <Style x:Key="Setup.CandidateCard" TargetType="RadioButton">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Background" Value="{StaticResource Brush.Bg.Panel}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}" />
+        <Setter Property="BorderThickness" Value="{StaticResource Thickness.Border.Thin}" />
+        <Setter Property="Padding" Value="16,14" />
+        <Setter Property="Margin" Value="0,0,0,10" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="RadioButton">
+              <Border x:Name="Root"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="{StaticResource Radius.Medium}"
+                      Padding="{TemplateBinding Padding}">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <Grid Grid.Column="0" Width="18" Height="18" VerticalAlignment="Top" Margin="0,1,14,0">
+                    <Ellipse x:Name="Outer" Stroke="{StaticResource Brush.Border.Strong}" StrokeThickness="1" Fill="{StaticResource Brush.Bg.Input}" />
+                    <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{StaticResource Brush.Accent}" Opacity="0" />
+                  </Grid>
+                  <ContentPresenter Grid.Column="1" />
+                </Grid>
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource Brush.Border.Strong}" />
+                  <Setter TargetName="Root" Property="Background" Value="{StaticResource Brush.Bg.PanelAlt}" />
+                </Trigger>
+                <Trigger Property="IsChecked" Value="True">
+                  <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+                  <Setter TargetName="Root" Property="Background" Value="{StaticResource Brush.Bg.PanelAlt}" />
+                  <Setter TargetName="Outer" Property="Stroke" Value="{StaticResource Brush.Accent}" />
+                  <Setter TargetName="Dot" Property="Opacity" Value="1" />
+                </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                  <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource Brush.Cyan}" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <DataTemplate x:Key="Setup.CandidateTemplate" DataType="{x:Type setup:InstallCandidateViewModel}">
+        <RadioButton Style="{StaticResource Setup.CandidateCard}" GroupName="SetupInstall"
+                     IsChecked="{Binding IsSelected, Mode=TwoWay}">
+          <StackPanel>
+            <StackPanel Orientation="Horizontal">
+              <Border Style="{DynamicResource Badge.Cyan}" Visibility="{Binding IsSteam, Converter={StaticResource Converter.BoolToVisibility}}">
+                <TextBlock Text="Steam" />
+              </Border>
+              <Border Style="{DynamicResource Badge.Purple}" Visibility="{Binding IsXbox, Converter={StaticResource Converter.BoolToVisibility}}">
+                <TextBlock Text="Xbox app" />
+              </Border>
+              <Border Style="{DynamicResource Badge}" Visibility="{Binding IsManual, Converter={StaticResource Converter.BoolToVisibility}}">
+                <TextBlock Text="Manual" />
+              </Border>
+              <TextBlock Style="{StaticResource Text.Small}" Text="{Binding LaunchHint}" VerticalAlignment="Center" Margin="10,0,0,0" />
+            </StackPanel>
+            <TextBlock Style="{StaticResource Text.Mono}" Text="{Binding Root}" ToolTip="{Binding Root}" Margin="0,8,0,0" />
+          </StackPanel>
+        </RadioButton>
+      </DataTemplate>
+
+      <!-- ============================ Existing mod row (step 2) ============================ -->
+      <DataTemplate x:Key="Setup.UnmanagedTemplate" DataType="{x:Type setup:UnmanagedFolderViewModel}">
+        <Border Background="{StaticResource Brush.Bg.Panel}"
+                BorderBrush="{StaticResource Brush.Border}"
+                BorderThickness="{StaticResource Thickness.Border.Thin}"
+                CornerRadius="{StaticResource Radius.Medium}"
+                Padding="14,10" Margin="0,0,0,8">
+          <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" Padding="12,0,0,0" HorizontalAlignment="Stretch">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Body}" Text="{Binding FolderName}" FontWeight="Medium" TextWrapping="NoWrap" ToolTip="{Binding FolderPath}" />
+              <TextBlock Style="{StaticResource Text.Small}" Text="{Binding Summary}" Margin="0,2,0,0" />
+            </StackPanel>
+          </CheckBox>
+        </Border>
+      </DataTemplate>
+    </ResourceDictionary>
+  </Window.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+
+    <!-- ============================ Title bar ============================ -->
+    <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+          Height="{StaticResource Size.TitleBar.Height}"
+          Background="{StaticResource Brush.Bg.Deepest}">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <TextBlock Grid.Column="0"
+                 Style="{StaticResource Text.Small}"
+                 Foreground="{StaticResource Brush.Text.Muted}"
+                 Text="{Binding WindowTitle}"
+                 VerticalAlignment="Center"
+                 Margin="16,0,0,0" />
+
+      <StackPanel Grid.Column="1" Orientation="Horizontal">
+        <Button Style="{StaticResource CaptionButton.Minimize}" Click="OnMinimizeClick" AutomationProperties.Name="Minimize" />
+        <Button x:Name="MaximizeButton" Style="{StaticResource CaptionButton.Maximize}" Click="OnMaximizeRestoreClick" AutomationProperties.Name="Maximize" />
+        <Button Style="{StaticResource CaptionButton.Close}" Click="OnCloseClick" AutomationProperties.Name="Close" />
+      </StackPanel>
+    </Grid>
+
+    <!-- ============================ Left column: logo + steps ============================ -->
+    <Border Grid.Row="1" Grid.Column="0"
+            Width="{StaticResource Size.Sidebar.Width}"
+            Background="{StaticResource Brush.Sidebar.Background}"
+            BorderBrush="{StaticResource Brush.Border.Subtle}"
+            BorderThickness="0,0,1,0">
+      <DockPanel LastChildFill="True">
+        <TextBlock DockPanel.Dock="Bottom"
+                   Style="{StaticResource Text.Caption}"
+                   TextWrapping="Wrap" TextTrimming="None" TextAlignment="Center"
+                   HorizontalAlignment="Center"
+                   Margin="16,0,16,16"><Run Text="Setting up for" /><LineBreak /><Run Text="{x:Static core:AppInfo.GameDisplayName}" /></TextBlock>
+
+        <StackPanel>
+          <Image Source="pack://application:,,,/Assets/Images/Logo.png"
+                 Width="180"
+                 Stretch="Uniform"
+                 RenderOptions.BitmapScalingMode="HighQuality"
+                 Margin="16,24,16,0" />
+          <TextBlock Text="MOD LOADER"
+                     FontFamily="{StaticResource Font.Display}"
+                     FontWeight="SemiBold"
+                     FontSize="13"
+                     Foreground="{StaticResource Brush.Accent.Light}"
+                     HorizontalAlignment="Center"
+                     Margin="0,4,0,24" />
+
+          <ItemsControl ItemsSource="{Binding Steps}" Focusable="False" IsTabStop="False" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- ============================ Right column: step content ============================ -->
+    <Grid Grid.Row="1" Grid.Column="1">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <!-- Header -->
+      <StackPanel Grid.Row="0" Margin="32,28,32,0">
+        <TextBlock Style="{StaticResource Text.H1}" Text="{Binding StepTitle}" />
+        <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding StepDescription}" TextWrapping="Wrap" Margin="0,6,0,0" />
+      </StackPanel>
+
+      <!-- Step bodies: exactly one is visible. -->
+      <Grid Grid.Row="1" Margin="32,20,32,0">
+
+        <!-- Step 1: Find your game -->
+        <Grid Visibility="{Binding IsGameFolderStep, Converter={StaticResource Converter.BoolToVisibility}}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <StackPanel Grid.Row="0" Margin="0,0,0,16"
+                      Visibility="{Binding IsSearching, Converter={StaticResource Converter.BoolToVisibility}}">
+            <TextBlock Style="{StaticResource Text.Secondary}"><Run Text="Searching for" /><Run Text=" " /><Run Text="{x:Static core:AppInfo.GameDisplayName}" /><Run Text="..." /></TextBlock>
+            <ProgressBar IsIndeterminate="True" Margin="0,10,0,0" />
+          </StackPanel>
+
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+            <StackPanel>
+              <ItemsControl ItemsSource="{Binding Candidates}" ItemTemplate="{StaticResource Setup.CandidateTemplate}" Focusable="False" IsTabStop="False" />
+              <TextBlock Style="{StaticResource Text.Body}" Foreground="{StaticResource Brush.Text.Secondary}"
+                         Visibility="{Binding NothingFound, Converter={StaticResource Converter.BoolToVisibility}}"><Run Text="We couldn't find" /><Run Text=" " /><Run Text="{x:Static core:AppInfo.GameDisplayName}" /><Run Text=". If it is installed, pick its folder below." /></TextBlock>
+            </StackPanel>
+          </ScrollViewer>
+
+          <StackPanel Grid.Row="2" Margin="0,16,0,0">
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{DynamicResource Button.Secondary}" Content="Browse..." Command="{Binding BrowseCommand}" />
+              <TextBlock Style="{StaticResource Text.Small}" Text="Pick the folder that contains the Dungeons folder." VerticalAlignment="Center" Margin="12,0,0,0" />
+            </StackPanel>
+            <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Danger}"
+                       Text="{Binding BrowseError}" TextWrapping="Wrap" Margin="0,8,0,0"
+                       Visibility="{Binding BrowseError, Converter={StaticResource Converter.NullToVisibility}}" />
+          </StackPanel>
+        </Grid>
+
+        <!-- Step 2: Existing mods -->
+        <Grid Visibility="{Binding IsExistingModsStep, Converter={StaticResource Converter.BoolToVisibility}}">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+            <ItemsControl ItemsSource="{Binding UnmanagedFolders}" ItemTemplate="{StaticResource Setup.UnmanagedTemplate}" Focusable="False" IsTabStop="False" />
+          </ScrollViewer>
+          <TextBlock Style="{StaticResource Text.Body}" Foreground="{StaticResource Brush.Text.Secondary}"
+                     Text="No existing mods found in ~mods." VerticalAlignment="Top"
+                     Visibility="{Binding NoUnmanagedFolders, Converter={StaticResource Converter.BoolToVisibility}}" />
+        </Grid>
+
+        <!-- Step 3: All set -->
+        <StackPanel Visibility="{Binding IsDoneStep, Converter={StaticResource Converter.BoolToVisibility}}">
+          <Border Style="{DynamicResource Card.Elevated}" MaxWidth="540" HorizontalAlignment="Left">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Style="{StaticResource Text.Label}" Text="GAME FOLDER" VerticalAlignment="Center" />
+                <Border Style="{DynamicResource Badge.Cyan}" Margin="10,0,0,0" Visibility="{Binding AppliedInstallation.IsSteam, Converter={StaticResource Converter.BoolToVisibility}}">
+                  <TextBlock Text="Steam" />
+                </Border>
+                <Border Style="{DynamicResource Badge.Purple}" Margin="10,0,0,0" Visibility="{Binding AppliedInstallation.IsXbox, Converter={StaticResource Converter.BoolToVisibility}}">
+                  <TextBlock Text="Xbox app" />
+                </Border>
+                <Border Style="{DynamicResource Badge}" Margin="10,0,0,0" Visibility="{Binding AppliedInstallation.IsManual, Converter={StaticResource Converter.BoolToVisibility}}">
+                  <TextBlock Text="Manual" />
+                </Border>
+              </StackPanel>
+              <TextBlock Style="{StaticResource Text.Mono}" Text="{Binding AppliedInstallation.Root}" ToolTip="{Binding AppliedInstallation.Root}" Margin="0,8,0,0" />
+              <TextBlock Style="{StaticResource Text.Small}" Text="{Binding AppliedInstallation.LaunchHint}" Margin="0,4,0,0" />
+              <Separator Style="{DynamicResource Divider}" />
+              <StackPanel Orientation="Horizontal">
+                <Path Data="{StaticResource Setup.Icon.Folder}" Width="16" Height="14" Stretch="Uniform"
+                      Fill="{StaticResource Brush.Text.Secondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <TextBlock Style="{StaticResource Text.Body}" Text="{Binding ImportedSummary}" VerticalAlignment="Center" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Muted}"
+                     Text="You can connect your Nexus Mods account later in Settings." TextWrapping="Wrap" Margin="0,16,0,0" />
+        </StackPanel>
+      </Grid>
+
+      <!-- Footer -->
+      <Border Grid.Row="2" BorderBrush="{StaticResource Brush.Border.Subtle}" BorderThickness="0,1,0,0" Padding="32,16,32,20" Margin="0,20,0,0">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <Button Grid.Column="0" Style="{DynamicResource Button.Ghost}" Content="Back" Command="{Binding BackCommand}"
+                  Visibility="{Binding ShowBack, Converter={StaticResource Converter.BoolToVisibility.Hidden}}" />
+
+          <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16,0"
+                      Visibility="{Binding IsBusy, Converter={StaticResource Converter.BoolToVisibility}}">
+            <ProgressBar Width="120" IsIndeterminate="True" VerticalAlignment="Center" />
+            <TextBlock Style="{StaticResource Text.Small}" Text="{Binding BusyText}" VerticalAlignment="Center" Margin="10,0,0,0" />
+          </StackPanel>
+
+          <StackPanel Grid.Column="2" Orientation="Horizontal">
+            <Button Style="{DynamicResource Button.Ghost}" Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" Margin="0,0,8,0"
+                    Visibility="{Binding ShowCancel, Converter={StaticResource Converter.BoolToVisibility}}" />
+            <Button Style="{DynamicResource Button.Primary}" Content="{Binding NextText}" Command="{Binding NextCommand}" IsDefault="True" MinWidth="120" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>
