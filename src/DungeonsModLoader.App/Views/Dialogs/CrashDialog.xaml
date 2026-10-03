@@ -1,0 +1,170 @@
+<Window x:Class="DungeonsModLoader.App.Views.Dialogs.CrashDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Something went wrong"
+        Width="560" SizeToContent="Height"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="False"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource Brush.Bg.Panel}"
+        Foreground="{StaticResource Brush.Text.Primary}"
+        FontFamily="{StaticResource Font.Body}"
+        FontSize="{StaticResource FontSize.Body}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Loaded="OnLoaded">
+
+  <!-- No system chrome; the 1px bottom glass keeps the DWM drop shadow on the borderless window. -->
+  <WindowChrome.WindowChrome>
+    <WindowChrome CaptionHeight="0" CornerRadius="0" GlassFrameThickness="0,0,0,1"
+                  ResizeBorderThickness="0" UseAeroCaptionButtons="False" />
+  </WindowChrome.WindowChrome>
+
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="CrashDialog.BoolToVisibility" />
+
+    <!-- "Details" disclosure: link-coloured text with a pixel chevron that turns when expanded. -->
+    <Style x:Key="CrashDialog.DetailsToggle" TargetType="ToggleButton">
+      <Setter Property="Foreground" Value="{StaticResource Brush.Text.Link}" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="Bd" Background="Transparent" Padding="2,4,2,2"
+                    BorderThickness="0,0,0,1" BorderBrush="Transparent">
+              <StackPanel Orientation="Horizontal">
+                <Path x:Name="Chevron" Width="8" Height="8" Margin="0,1,8,0"
+                      Data="M0,0 L4,4 L0,8 Z" Stretch="Uniform" VerticalAlignment="Center"
+                      Fill="{TemplateBinding Foreground}" RenderTransformOrigin="0.5,0.5" />
+                <ContentPresenter VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
+              </StackPanel>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Chevron" Property="RenderTransform">
+                  <Setter.Value>
+                    <RotateTransform Angle="90" />
+                  </Setter.Value>
+                </Setter>
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Brush.Text.Link}" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Brush.Cyan}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- Read-only monospace report box. Self-contained so the shared TextBox style (single-line height) never applies. -->
+    <Style x:Key="CrashDialog.DetailsBox" TargetType="TextBox">
+      <Setter Property="FontFamily" Value="{StaticResource Font.Mono}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+      <Setter Property="Foreground" Value="{StaticResource Brush.Text.Secondary}" />
+      <Setter Property="Background" Value="{StaticResource Brush.Bg.Input}" />
+      <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}" />
+      <Setter Property="BorderThickness" Value="{StaticResource Thickness.Border.Thin}" />
+      <Setter Property="CaretBrush" Value="{StaticResource Brush.Cyan}" />
+      <Setter Property="SelectionBrush" Value="{StaticResource Brush.Cyan}" />
+      <Setter Property="SelectionOpacity" Value="0.35" />
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="Height" Value="180" />
+      <Setter Property="IsReadOnly" Value="True" />
+      <Setter Property="IsReadOnlyCaretVisible" Value="False" />
+      <Setter Property="AcceptsReturn" Value="True" />
+      <Setter Property="TextWrapping" Value="NoWrap" />
+      <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+      <Setter Property="HorizontalScrollBarVisibility" Value="Auto" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{StaticResource Radius.Small}" SnapsToDevicePixels="True">
+              <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Brush.Cyan}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
+  <Border Background="{StaticResource Brush.Bg.Panel}"
+          BorderBrush="{StaticResource Brush.Border.Strong}"
+          BorderThickness="{StaticResource Thickness.Border.Thin}">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <!-- Header: draggable, no caption buttons (the footer actions are the only way out). -->
+      <Border Grid.Row="0" Background="Transparent" Padding="24,20,24,0"
+              MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+        <StackPanel Orientation="Horizontal">
+          <Border Width="26" Height="26" VerticalAlignment="Center"
+                  Background="{StaticResource Brush.Danger.Faint}"
+                  BorderBrush="{StaticResource Brush.Danger}"
+                  BorderThickness="{StaticResource Thickness.Border.Thin}"
+                  CornerRadius="{StaticResource Radius.Small}">
+            <TextBlock Text="!" FontFamily="{StaticResource Font.Display}" FontWeight="Bold"
+                       FontSize="{StaticResource FontSize.H2}" Foreground="{StaticResource Brush.Danger}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+          </Border>
+          <TextBlock Style="{StaticResource Text.H2}" Text="Something went wrong"
+                     VerticalAlignment="Center" Margin="12,0,0,0" />
+        </StackPanel>
+      </Border>
+
+      <!-- Body -->
+      <StackPanel Grid.Row="1" Margin="24,12,24,20">
+        <TextBlock x:Name="MessageText" Style="{StaticResource Text.Body}"
+                   Foreground="{StaticResource Brush.Text.Secondary}" />
+        <ToggleButton x:Name="DetailsToggle" Style="{StaticResource CrashDialog.DetailsToggle}"
+                      Content="Details" Margin="0,16,0,0" />
+        <TextBox x:Name="DetailsBox" Style="{StaticResource CrashDialog.DetailsBox}" Margin="0,8,0,0"
+                 Visibility="{Binding IsChecked, ElementName=DetailsToggle, Converter={StaticResource CrashDialog.BoolToVisibility}}" />
+      </StackPanel>
+
+      <!-- Footer: secondary actions left, the one primary action right. -->
+      <Border Grid.Row="2" Background="{StaticResource Brush.Bg.PanelAlt}"
+              BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="24,16">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <Button x:Name="OpenLogsButton" Grid.Column="0" Content="Open logs folder"
+                  Style="{DynamicResource Button.Secondary}" MinWidth="120"
+                  MinHeight="{StaticResource Size.Control.Height}" Padding="{StaticResource Padding.Button}"
+                  Click="OnOpenLogsClick" />
+          <Button x:Name="ContinueButton" Grid.Column="2" Content="Continue" IsCancel="True"
+                  Style="{DynamicResource Button.Secondary}" MinWidth="110" Margin="0,0,8,0"
+                  MinHeight="{StaticResource Size.Control.Height}" Padding="{StaticResource Padding.Button}"
+                  Click="OnContinueClick" />
+          <Button x:Name="CloseAppButton" Grid.Column="3" Content="Close app" IsDefault="True"
+                  Style="{DynamicResource Button.Primary}" MinWidth="110"
+                  MinHeight="{StaticResource Size.Control.Height}" Padding="{StaticResource Padding.Button}"
+                  Click="OnCloseAppClick" />
+        </Grid>
+      </Border>
+
+      <!-- The "extruded" bottom edge shared by buttons and cards. -->
+      <Border Grid.Row="3" Height="{StaticResource Size.Extrude}" Background="{StaticResource Brush.Bevel.Dark}" />
+    </Grid>
+  </Border>
+</Window>
