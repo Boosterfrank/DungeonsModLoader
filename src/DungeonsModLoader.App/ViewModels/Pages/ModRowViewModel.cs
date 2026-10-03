@@ -161,7 +161,9 @@ public sealed partial class ModRowViewModel : ObservableObject
                 return MissingSubtitle;
             }
 
-            return string.IsNullOrWhiteSpace(Version) ? $"by {Author}" : $"by {Author} · v{Version}";
+            // Local mods rarely carry an author; "by Unknown author" reads like an error, so say what it is instead.
+            var who = IsLocal && Author == UnknownAuthor ? "Local mod" : $"by {Author}";
+            return string.IsNullOrWhiteSpace(Version) ? who : $"{who} · v{Version}";
         }
     }
 

@@ -193,12 +193,11 @@
     </StackPanel>
 
     <!-- ============================ Toolbar ============================ -->
-    <!-- Search | filter chips (wrap when the window is narrow) | bulk actions. -->
+    <!-- Search | filter chips (wrap when the window is narrow). Bulk actions live in the footer. -->
     <Grid Grid.Row="1" Margin="0,20,0,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
 
       <TextBox Grid.Column="0"
@@ -209,7 +208,7 @@
                Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                AutomationProperties.Name="Search mods" />
 
-      <WrapPanel Grid.Column="1" Margin="16,0,16,0" VerticalAlignment="Top">
+      <WrapPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Top">
         <RadioButton Style="{StaticResource Installed.Chip}" GroupName="InstalledFilter" Content="All"
                      IsChecked="{Binding IsAllFilter, Mode=TwoWay}" />
         <RadioButton Style="{StaticResource Installed.Chip}" GroupName="InstalledFilter" Content="Enabled"
@@ -219,11 +218,6 @@
         <RadioButton Style="{StaticResource Installed.Chip}" GroupName="InstalledFilter" Content="Updates available"
                      IsChecked="{Binding IsUpdatesFilter, Mode=TwoWay}" />
       </WrapPanel>
-
-      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top" Margin="0,4,0,0">
-        <Button Style="{StaticResource Installed.SmallButton}" Content="Enable all" Command="{Binding EnableAllCommand}" Margin="0,0,8,0" />
-        <Button Style="{StaticResource Installed.SmallButton}" Content="Disable all" Command="{Binding DisableAllCommand}" />
-      </StackPanel>
     </Grid>
 
     <!-- ============================ Game-running banner ============================ -->
@@ -276,7 +270,7 @@
                   Visibility="{Binding ShowEmptyState, Converter={StaticResource Converter.BoolToVisibility}}">
         <Path Style="{StaticResource EmptyState.Icon}" Data="{StaticResource Icon.Installed}" />
         <TextBlock Style="{StaticResource EmptyState.Headline}" Text="No mods installed yet" />
-        <Button Style="{DynamicResource Button.Primary}"
+        <Button Style="{DynamicResource Button.Secondary}"
                 Content="Browse Nexus Mods"
                 HorizontalAlignment="Center"
                 Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
@@ -284,10 +278,21 @@
       </StackPanel>
     </Grid>
 
-    <!-- ============================ Footer ============================ -->
+    <!-- ============================ Footer: status line + bulk actions ============================ -->
     <StackPanel Grid.Row="5">
-      <Separator Style="{DynamicResource Divider}" Margin="0,8,0,10" />
-      <TextBlock Style="{StaticResource Text.Small}" Text="{Binding FooterText}" />
+      <Separator Style="{DynamicResource Divider}" Margin="0,8,0,8" />
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Grid.Column="0" Style="{StaticResource Text.Small}" Text="{Binding FooterText}" VerticalAlignment="Center" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal"
+                    Visibility="{Binding HasAnyRows, Converter={StaticResource Converter.BoolToVisibility}}">
+          <Button Style="{StaticResource Installed.SmallButton}" Content="Enable all" Command="{Binding EnableAllCommand}" Margin="0,0,8,0" />
+          <Button Style="{StaticResource Installed.SmallButton}" Content="Disable all" Command="{Binding DisableAllCommand}" />
+        </StackPanel>
+      </Grid>
     </StackPanel>
   </Grid>
 </UserControl>
