@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # Claude Code session worktrees
 .claude/worktrees/
+
+# Design reference images are kept outside the repo
+design-reference/

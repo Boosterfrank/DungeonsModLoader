@@ -4,6 +4,7 @@ using DungeonsModLoader.App.ViewModels.Pages;
 using DungeonsModLoader.App.Views;
 using DungeonsModLoader.App.Views.Dialogs;
 using DungeonsModLoader.Core;
+using DungeonsModLoader.Core.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -31,6 +32,13 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton(paths);
         services.AddSingleton<IWindowService, WindowService>();
+
+        services
+            .AddCoreInfrastructure()
+            .AddCoreGame()
+            .AddCoreMods()
+            .AddSetupFeature()
+            .AddInstalledFeature();
 
         services.AddHttpClient();
         services.AddHttpClient(HttpClientName, client =>

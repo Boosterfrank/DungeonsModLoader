@@ -24,6 +24,9 @@ public partial class App : Application
     /// <summary>Command-line switch that opens the theme swatch window instead of the main window.</summary>
     private const string SwatchSwitch = "--swatch";
 
+    /// <summary>Command-line switch (followed by a path) that overrides the app data folder.</summary>
+    private const string DataDirSwitch = "--data-dir";
+
     private static readonly TimeSpan HostStopTimeout = TimeSpan.FromSeconds(5);
 
     private static IHost? _host;
@@ -49,7 +52,7 @@ public partial class App : Application
         // Hooked before anything else so even a failure in the next few lines ends in the crash dialog.
         RegisterGlobalExceptionHandlers();
 
-        var paths = new AppPaths();
+        var paths = CreatePaths(e.Args);
         paths.EnsureCreated();
         _paths = paths;
 
@@ -104,6 +107,23 @@ public partial class App : Application
         _log.Information("{App} shut down (exit code {ExitCode})", AppInfo.DisplayName, e.ApplicationExitCode);
         Log.CloseAndFlush();
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// Data folder: <c>%LOCALAPPDATA%\DungeonsModLoader</c>, or the folder given with <c>--data-dir &lt;path&gt;</c>
+    /// (developer/testing switch that isolates settings, manifest, logs and cache).
+    /// </summary>
+    private static AppPaths CreatePaths(string[] args)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], DataDirSwitch, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(args[i + 1]))
+            {
+                return new AppPaths(Path.GetFullPath(args[i + 1]));
+            }
+        }
+
+        return new AppPaths();
     }
 
     private static Serilog.ILogger CreateLogger(AppPaths paths)

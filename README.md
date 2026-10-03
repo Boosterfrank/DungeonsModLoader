@@ -20,7 +20,10 @@ dotnet run --project src/DungeonsModLoader.App
 
 Or open `DungeonsModLoader.sln` in Visual Studio 2022 and press F5.
 
-Run the app with `--swatch` to open the theme swatch window (design tokens, typography, control gallery).
+Developer switches:
+
+- `--swatch` opens the theme swatch window (design tokens, typography, control gallery).
+- `--data-dir <folder>` uses an isolated app data folder (settings, manifest, logs, cache) instead of `%LOCALAPPDATA%\DungeonsModLoader`.
 
 ## Solution layout
 
@@ -34,7 +37,6 @@ tests/
   DungeonsModLoader.Core.Tests/
 installer/
   setup.iss                   Inno Setup script (milestone 7)
-design-reference/             Visual reference material for the theme (read-only input)
 ```
 
 ## How mods are stored
