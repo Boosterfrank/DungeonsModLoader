@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>DungeonsModLoader.App</RootNamespace>
+    <AssemblyName>DungeonsModLoader</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Extensions.Hosting" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Serilog.Sinks.Debug" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DungeonsModLoader.Core\DungeonsModLoader.Core.csproj" />
+    <ProjectReference Include="..\DungeonsModLoader.Nexus\DungeonsModLoader.Nexus.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Bundled fonts (SIL OFL) and images are embedded as WPF resources: pack://application:,,,/Assets/... -->
+    <Resource Include="Assets\Fonts\*.ttf" />
+    <Resource Include="Assets\Images\*.png" />
+    <None Include="Assets\Fonts\*.txt" />
+  </ItemGroup>
+
+</Project>

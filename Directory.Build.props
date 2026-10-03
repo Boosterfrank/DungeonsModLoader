@@ -1,0 +1,24 @@
+<Project>
+
+  <!-- Shared settings for every project in the solution. The app version lives here (one place). -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Authors>Boosterfrank</Authors>
+    <Company>Boosterfrank</Company>
+    <Product>DungeonsModLoader</Product>
+    <Copyright>Copyright (c) 2026 Boosterfrank</Copyright>
+    <RepositoryUrl>https://github.com/Boosterfrank/DungeonsModLoader</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
+    <NeutralLanguage>en</NeutralLanguage>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,197 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+  <!--
+    DungeonsModLoader theme tokens - derived from design-reference/ (inventory screen, poster, logo).
+
+    Backgrounds : deep teal-navy "brick" tones from the inventory screen (#082B3A -> #0A131D) and the poster (#021435).
+    Accent      : the gold/orange of the DUNGEONS II logo (#FFE465 / #FFAD27 / #C85C1E, extrusion #962915).
+    Cyan        : the logo's cyan glow (#38BAD9) - used for focus, selection and links.
+    Text        : warm off-white like the MINECRAFT lettering, blue-grey secondaries from the UI labels.
+    Shape       : the game UI is beveled pixel-art - small radii, 2px borders, and a darker "extruded" bottom edge.
+
+    Naming: Color.* are Color values, Brush.* are brushes, Effect.* are effects, Size/Space/Radius.* are metrics.
+  -->
+
+  <!-- ============================ Backgrounds ============================ -->
+  <Color x:Key="Color.Bg.Deepest">#FF060C12</Color>
+  <Color x:Key="Color.Bg.Base">#FF0A1722</Color>
+  <Color x:Key="Color.Bg.Sidebar">#FF08121A</Color>
+  <Color x:Key="Color.Bg.Panel">#FF0F2230</Color>
+  <Color x:Key="Color.Bg.PanelAlt">#FF132A39</Color>
+  <Color x:Key="Color.Bg.Input">#FF0B161F</Color>
+  <Color x:Key="Color.Bg.Overlay">#FF000000</Color>
+
+  <!-- ============================ Borders / bevels ============================ -->
+  <Color x:Key="Color.Border">#FF1F3A49</Color>
+  <Color x:Key="Color.Border.Strong">#FF35586B</Color>
+  <Color x:Key="Color.Border.Subtle">#FF152A37</Color>
+  <Color x:Key="Color.Bevel.Light">#FF4F6672</Color>
+  <Color x:Key="Color.Bevel.Dark">#FF04090D</Color>
+
+  <!-- ============================ Accent (logo gold / orange) ============================ -->
+  <Color x:Key="Color.Accent">#FFF5A623</Color>
+  <Color x:Key="Color.Accent.Light">#FFFFD24A</Color>
+  <Color x:Key="Color.Accent.Dark">#FFC9641C</Color>
+  <Color x:Key="Color.Accent.Deep">#FF8C2912</Color>
+
+  <!-- ============================ Secondary (logo cyan glow) ============================ -->
+  <Color x:Key="Color.Cyan">#FF3EC3E6</Color>
+  <Color x:Key="Color.Cyan.Dim">#FF1E7F9B</Color>
+
+  <!-- ============================ Semantic ============================ -->
+  <Color x:Key="Color.Success">#FF43B14B</Color>
+  <Color x:Key="Color.Success.Dark">#FF2E7D33</Color>
+  <Color x:Key="Color.Warning">#FFFFC845</Color>
+  <Color x:Key="Color.Danger">#FFE04B3B</Color>
+  <Color x:Key="Color.Danger.Dark">#FF9C2A1B</Color>
+  <Color x:Key="Color.Purple">#FFA24ED0</Color>
+
+  <!-- ============================ Text ============================ -->
+  <Color x:Key="Color.Text.Primary">#FFF4F1E8</Color>
+  <Color x:Key="Color.Text.Secondary">#FF9DB0BB</Color>
+  <Color x:Key="Color.Text.Muted">#FF5E7482</Color>
+  <Color x:Key="Color.Text.Disabled">#FF3E525E</Color>
+  <Color x:Key="Color.Text.OnAccent">#FF241204</Color>
+  <Color x:Key="Color.Text.Link">#FF5BD0EE</Color>
+
+  <!-- ============================ Solid brushes ============================ -->
+  <SolidColorBrush x:Key="Brush.Bg.Deepest" Color="{StaticResource Color.Bg.Deepest}" />
+  <SolidColorBrush x:Key="Brush.Bg.Base" Color="{StaticResource Color.Bg.Base}" />
+  <SolidColorBrush x:Key="Brush.Bg.Sidebar" Color="{StaticResource Color.Bg.Sidebar}" />
+  <SolidColorBrush x:Key="Brush.Bg.Panel" Color="{StaticResource Color.Bg.Panel}" />
+  <SolidColorBrush x:Key="Brush.Bg.PanelAlt" Color="{StaticResource Color.Bg.PanelAlt}" />
+  <SolidColorBrush x:Key="Brush.Bg.Input" Color="{StaticResource Color.Bg.Input}" />
+  <SolidColorBrush x:Key="Brush.Bg.Overlay" Color="{StaticResource Color.Bg.Overlay}" Opacity="0.62" />
+
+  <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource Color.Border}" />
+  <SolidColorBrush x:Key="Brush.Border.Strong" Color="{StaticResource Color.Border.Strong}" />
+  <SolidColorBrush x:Key="Brush.Border.Subtle" Color="{StaticResource Color.Border.Subtle}" />
+  <SolidColorBrush x:Key="Brush.Bevel.Light" Color="{StaticResource Color.Bevel.Light}" />
+  <SolidColorBrush x:Key="Brush.Bevel.Dark" Color="{StaticResource Color.Bevel.Dark}" />
+
+  <SolidColorBrush x:Key="Brush.Accent" Color="{StaticResource Color.Accent}" />
+  <SolidColorBrush x:Key="Brush.Accent.Light" Color="{StaticResource Color.Accent.Light}" />
+  <SolidColorBrush x:Key="Brush.Accent.Dark" Color="{StaticResource Color.Accent.Dark}" />
+  <SolidColorBrush x:Key="Brush.Accent.Deep" Color="{StaticResource Color.Accent.Deep}" />
+  <SolidColorBrush x:Key="Brush.Accent.Faint" Color="{StaticResource Color.Accent}" Opacity="0.14" />
+
+  <SolidColorBrush x:Key="Brush.Cyan" Color="{StaticResource Color.Cyan}" />
+  <SolidColorBrush x:Key="Brush.Cyan.Dim" Color="{StaticResource Color.Cyan.Dim}" />
+  <SolidColorBrush x:Key="Brush.Cyan.Faint" Color="{StaticResource Color.Cyan}" Opacity="0.16" />
+
+  <SolidColorBrush x:Key="Brush.Success" Color="{StaticResource Color.Success}" />
+  <SolidColorBrush x:Key="Brush.Success.Dark" Color="{StaticResource Color.Success.Dark}" />
+  <SolidColorBrush x:Key="Brush.Success.Faint" Color="{StaticResource Color.Success}" Opacity="0.16" />
+  <SolidColorBrush x:Key="Brush.Warning" Color="{StaticResource Color.Warning}" />
+  <SolidColorBrush x:Key="Brush.Warning.Faint" Color="{StaticResource Color.Warning}" Opacity="0.16" />
+  <SolidColorBrush x:Key="Brush.Danger" Color="{StaticResource Color.Danger}" />
+  <SolidColorBrush x:Key="Brush.Danger.Dark" Color="{StaticResource Color.Danger.Dark}" />
+  <SolidColorBrush x:Key="Brush.Danger.Faint" Color="{StaticResource Color.Danger}" Opacity="0.16" />
+  <SolidColorBrush x:Key="Brush.Purple" Color="{StaticResource Color.Purple}" />
+  <SolidColorBrush x:Key="Brush.Purple.Faint" Color="{StaticResource Color.Purple}" Opacity="0.18" />
+
+  <SolidColorBrush x:Key="Brush.Text.Primary" Color="{StaticResource Color.Text.Primary}" />
+  <SolidColorBrush x:Key="Brush.Text.Secondary" Color="{StaticResource Color.Text.Secondary}" />
+  <SolidColorBrush x:Key="Brush.Text.Muted" Color="{StaticResource Color.Text.Muted}" />
+  <SolidColorBrush x:Key="Brush.Text.Disabled" Color="{StaticResource Color.Text.Disabled}" />
+  <SolidColorBrush x:Key="Brush.Text.OnAccent" Color="{StaticResource Color.Text.OnAccent}" />
+  <SolidColorBrush x:Key="Brush.Text.Link" Color="{StaticResource Color.Text.Link}" />
+
+  <!-- ============================ Gradient brushes ============================ -->
+  <!-- Window canvas: the inventory screen fades from teal at the top to near-black at the bottom. -->
+  <LinearGradientBrush x:Key="Brush.Window.Background" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#FF0C2131" Offset="0" />
+    <GradientStop Color="#FF0A1722" Offset="0.55" />
+    <GradientStop Color="#FF070E15" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="Brush.Sidebar.Background" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#FF0A1823" Offset="0" />
+    <GradientStop Color="#FF07111A" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="Brush.Panel.Gradient" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#FF112636" Offset="0" />
+    <GradientStop Color="#FF0E1F2C" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- Primary action: the logo's gold -> orange face. -->
+  <LinearGradientBrush x:Key="Brush.Accent.Gradient" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#FFFFD24A" Offset="0" />
+    <GradientStop Color="#FFF5A623" Offset="0.55" />
+    <GradientStop Color="#FFE8891A" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="Brush.Accent.GradientHover" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#FFFFE070" Offset="0" />
+    <GradientStop Color="#FFFFB83A" Offset="0.55" />
+    <GradientStop Color="#FFF09A22" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="Brush.Accent.GradientPressed" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#FFE9B32E" Offset="0" />
+    <GradientStop Color="#FFD98E17" Offset="0.55" />
+    <GradientStop Color="#FFC97312" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="Brush.Danger.Gradient" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#FFF0604F" Offset="0" />
+    <GradientStop Color="#FFE04B3B" Offset="0.55" />
+    <GradientStop Color="#FFB9321F" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="Brush.Danger.GradientHover" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#FFF87565" Offset="0" />
+    <GradientStop Color="#FFEA5A4A" Offset="0.55" />
+    <GradientStop Color="#FFC93A26" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="Brush.Success.Gradient" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#FF5AC95F" Offset="0" />
+    <GradientStop Color="#FF43B14B" Offset="0.55" />
+    <GradientStop Color="#FF2E8A36" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- ============================ Effects ============================ -->
+  <DropShadowEffect x:Key="Effect.Glow.Accent" Color="{StaticResource Color.Accent}" BlurRadius="16" ShadowDepth="0" Opacity="0.6" />
+  <DropShadowEffect x:Key="Effect.Glow.Cyan" Color="{StaticResource Color.Cyan}" BlurRadius="16" ShadowDepth="0" Opacity="0.65" />
+  <DropShadowEffect x:Key="Effect.Glow.Danger" Color="{StaticResource Color.Danger}" BlurRadius="16" ShadowDepth="0" Opacity="0.55" />
+  <DropShadowEffect x:Key="Effect.Shadow.Panel" Color="#FF000000" BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.5" />
+  <DropShadowEffect x:Key="Effect.Shadow.Soft" Color="#FF000000" BlurRadius="10" ShadowDepth="2" Direction="270" Opacity="0.35" />
+
+  <!-- ============================ Shape / metrics ============================ -->
+  <CornerRadius x:Key="Radius.Small">2</CornerRadius>
+  <CornerRadius x:Key="Radius.Medium">4</CornerRadius>
+  <CornerRadius x:Key="Radius.Large">6</CornerRadius>
+  <CornerRadius x:Key="Radius.Pill">999</CornerRadius>
+
+  <Thickness x:Key="Thickness.Border.Thin">1</Thickness>
+  <Thickness x:Key="Thickness.Border.Thick">2</Thickness>
+
+  <sys:Double x:Key="Space.XS">4</sys:Double>
+  <sys:Double x:Key="Space.S">8</sys:Double>
+  <sys:Double x:Key="Space.M">12</sys:Double>
+  <sys:Double x:Key="Space.L">16</sys:Double>
+  <sys:Double x:Key="Space.XL">24</sys:Double>
+  <sys:Double x:Key="Space.XXL">32</sys:Double>
+
+  <Thickness x:Key="Padding.Page">32,24,32,24</Thickness>
+  <Thickness x:Key="Padding.Card">16</Thickness>
+  <Thickness x:Key="Padding.Button">18,0,18,0</Thickness>
+
+  <sys:Double x:Key="Size.Sidebar.Width">220</sys:Double>
+  <sys:Double x:Key="Size.TitleBar.Height">40</sys:Double>
+  <sys:Double x:Key="Size.Control.Height">36</sys:Double>
+  <sys:Double x:Key="Size.Control.HeightSmall">28</sys:Double>
+  <sys:Double x:Key="Size.Control.HeightLarge">48</sys:Double>
+  <!-- Height of the darker "3D" bottom edge on buttons and cards (the logo's extrusion). -->
+  <sys:Double x:Key="Size.Extrude">3</sys:Double>
+
+  <!-- ============================ Motion ============================ -->
+  <Duration x:Key="Duration.Fast">0:0:0.12</Duration>
+  <Duration x:Key="Duration.Normal">0:0:0.2</Duration>
+  <Duration x:Key="Duration.Slow">0:0:0.32</Duration>
+
+</ResourceDictionary>
