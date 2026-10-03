@@ -1,0 +1,38 @@
+<UserControl x:Class="DungeonsModLoader.App.Views.Pages.InstalledPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:core="clr-namespace:DungeonsModLoader.Core;assembly=DungeonsModLoader.Core">
+  <!-- DataContext: InstalledViewModel. The real mod list arrives in milestone 2. -->
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="pack://application:,,,/Views/Shell/PageStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid Margin="{StaticResource Padding.Page}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <StackPanel Grid.Row="0">
+      <TextBlock Style="{StaticResource Text.H1}" Text="{Binding Title}" />
+      <TextBlock Style="{StaticResource Page.Subtitle}">
+        <Run Text="Mods installed in" /><Run Text=" " /><Run Text="{x:Static core:AppInfo.GameDisplayName}" /><Run Text=", with their enabled state." />
+      </TextBlock>
+    </StackPanel>
+
+    <!-- Empty state -->
+    <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
+      <Path Style="{StaticResource EmptyState.Icon}" Data="{StaticResource Icon.Installed}" />
+      <TextBlock Style="{StaticResource EmptyState.Headline}" Text="No mods installed yet" />
+      <Button Style="{DynamicResource Button.Primary}"
+              Content="Browse Nexus Mods"
+              HorizontalAlignment="Center"
+              Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+              CommandParameter="{Binding DataContext.Browse, RelativeSource={RelativeSource AncestorType=Window}}" />
+    </StackPanel>
+  </Grid>
+</UserControl>
