@@ -29,7 +29,8 @@
     <!-- Bundled fonts (SIL OFL) and images are embedded as WPF resources: pack://application:,,,/Assets/... -->
     <Resource Include="Assets\Fonts\*.ttf" />
     <Resource Include="Assets\Images\*.png" />
-    <None Include="Assets\Fonts\*.txt" />
+    <!-- Font licence texts ship next to the app (licenses\OFL-*.txt). -->
+    <None Include="Assets\Fonts\*.txt" Link="licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

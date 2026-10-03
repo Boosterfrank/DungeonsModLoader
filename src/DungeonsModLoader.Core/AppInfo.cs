@@ -24,7 +24,9 @@ public static class AppInfo
 
     private static string ResolveVersion()
     {
-        var assembly = Assembly.GetEntryAssembly() ?? typeof(AppInfo).Assembly;
+        // Every project shares the same Version (Directory.Build.props), so the Core assembly is the reliable source
+        // (the entry assembly would be the test host under xUnit).
+        var assembly = typeof(AppInfo).Assembly;
         var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(informational))
         {
