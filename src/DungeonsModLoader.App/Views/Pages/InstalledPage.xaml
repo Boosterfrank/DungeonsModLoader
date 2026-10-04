@@ -265,6 +265,16 @@
         <TextBlock Style="{StaticResource Text.Secondary}" Text="Try another search or pick a different filter." TextAlignment="Center" TextWrapping="Wrap" />
       </StackPanel>
 
+      <!-- The mod store could not be prepared (manifest unreadable, folders not accessible). -->
+      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460"
+                  Visibility="{Binding ShowInitError, Converter={StaticResource Converter.BoolToVisibility}}">
+        <Border Style="{DynamicResource Badge.Danger}" HorizontalAlignment="Center" Margin="0,0,0,12">
+          <TextBlock Text="Mod list unavailable" />
+        </Border>
+        <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding InitErrorText}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,16" />
+        <Button Style="{DynamicResource Button.Secondary}" Content="Try again" HorizontalAlignment="Center" Command="{Binding RetryInitializeCommand}" />
+      </StackPanel>
+
       <!-- Nothing installed at all. -->
       <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420"
                   Visibility="{Binding ShowEmptyState, Converter={StaticResource Converter.BoolToVisibility}}">

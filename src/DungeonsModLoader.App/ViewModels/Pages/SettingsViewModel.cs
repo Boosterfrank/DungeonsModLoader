@@ -21,6 +21,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     private readonly IGameContext _gameContext;
     private readonly IGameLocator _locator;
     private readonly IDialogService _dialogs;
+    private readonly IModStoreInitializer _initializer;
     private readonly ILogger<SettingsViewModel> _logger;
     private int _confirmationVersion;
 
@@ -31,6 +32,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         IGameContext gameContext,
         IGameLocator locator,
         IDialogService dialogs,
+        IModStoreInitializer initializer,
         ILogger<SettingsViewModel> logger)
     {
         _windows = windows;
@@ -39,6 +41,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         _gameContext = gameContext;
         _locator = locator;
         _dialogs = dialogs;
+        _initializer = initializer;
         _logger = logger;
 
         RefreshGame();
@@ -125,13 +128,18 @@ public sealed partial class SettingsViewModel : PageViewModel
                 return;
             }
 
-            var applied = await ApplyAsync(found[0]);
+            // Keep the install the user already chose when it is still there (e.g. the Xbox copy on a machine that
+            // also has Steam); only fall back to the first result when the current one is gone.
+            var current = _gameContext.Current;
+            var chosen = found.FirstOrDefault(i => current is not null && GamePaths.AreSameFolder(i.Root, current.Root)) ?? found[0];
+
+            var applied = await ApplyAsync(chosen);
             if (applied && found.Count > 1)
             {
                 var roots = string.Join(Environment.NewLine, found.Select(i => $"• {GameSourceLabels.For(i.Source)}: {i.Root}"));
                 await _dialogs.ShowInfoAsync(
                     "Several installations found",
-                    $"The first one is now in use. Use Browse to switch to another:{Environment.NewLine}{Environment.NewLine}{roots}");
+                    $"{GameSourceLabels.For(chosen.Source)} at {chosen.Root} is in use. Use Browse to switch to another:{Environment.NewLine}{Environment.NewLine}{roots}");
             }
         }
         finally
@@ -180,18 +188,28 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
     }
 
-    /// <summary>Stores, saves and activates <paramref name="installation"/>; the mod store re-initializes itself on the context change.</summary>
+    /// <summary>
+    /// Stores, saves and activates <paramref name="installation"/>, then prepares the mod store for it (offering the
+    /// permission fix when the folders are not writable). A failed save restores the previous stored values.
+    /// </summary>
     private async Task<bool> ApplyAsync(GameInstallation installation)
     {
-        var previous = _settings.Current.ToGameInstallation();
-        _settings.Current.ApplyGameInstallation(installation);
+        var settings = _settings.Current;
+        var (previousRoot, previousSource, previousSteamAppId, previousXboxId) =
+            (settings.GameRootPath, settings.GameSource, settings.SteamAppId, settings.XboxAppUserModelId);
+
+        settings.ApplyGameInstallation(installation);
         try
         {
             await _settings.SaveAsync();
         }
         catch (Exception ex)
         {
-            _settings.Current.ApplyGameInstallation(previous);
+            // Restore the raw stored fields (not a re-derived installation, which would be null if the old root is gone).
+            settings.GameRootPath = previousRoot;
+            settings.GameSource = previousSource;
+            settings.SteamAppId = previousSteamAppId;
+            settings.XboxAppUserModelId = previousXboxId;
             _logger.LogError(ex, "Saving the game folder failed");
             await _dialogs.ShowErrorAsync(
                 "Settings could not be saved",
@@ -203,7 +221,9 @@ public sealed partial class SettingsViewModel : PageViewModel
         _logger.LogInformation("Game folder set to {Source} install at {Root}", installation.Source, installation.Root);
         _gameContext.Set(installation);
         RefreshGame();
-        _ = ShowConfirmationAsync("Game folder updated.");
+
+        var ready = await _initializer.InitializeAsync();
+        _ = ShowConfirmationAsync(ready ? "Game folder updated." : "Game folder updated, but the mod list is not ready yet.");
         return true;
     }
 

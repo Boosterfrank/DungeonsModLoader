@@ -24,6 +24,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IGameContext _game;
     private readonly IGameProcessMonitor _monitor;
     private readonly IModService _mods;
+    private readonly IModStoreInitializer _initializer;
     private readonly IDialogService _dialogs;
     private readonly ILogger<MainViewModel> _logger;
 
@@ -39,6 +40,7 @@ public sealed partial class MainViewModel : ObservableObject
         IGameContext game,
         IGameProcessMonitor monitor,
         IModService mods,
+        IModStoreInitializer initializer,
         IDialogService dialogs,
         ILogger<MainViewModel> logger)
     {
@@ -50,6 +52,7 @@ public sealed partial class MainViewModel : ObservableObject
         _game = game;
         _monitor = monitor;
         _mods = mods;
+        _initializer = initializer;
         _dialogs = dialogs;
         _logger = logger;
 
@@ -114,9 +117,17 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         SetStatus($"Launching {AppInfo.GameDisplayName}...", autoClear: false);
+
+        // Make sure the mod folders are in place (milestone 4 applies the active profile here). A permission
+        // problem offers the one-time fix; if the folders still cannot be prepared the user may launch anyway.
+        if (!await PrepareModFoldersAsync())
+        {
+            SetStatus(string.Empty, autoClear: false);
+            return;
+        }
+
         try
         {
-            await _mods.ReconcileAsync();
             await _launcher.LaunchAsync(installation);
             _logger.LogInformation("Game launched via {Source} from {Root}", installation.Source, installation.Root);
             SetStatus($"{AppInfo.GameDisplayName} is starting...", autoClear: true);
@@ -128,16 +139,6 @@ public sealed partial class MainViewModel : ObservableObject
             await _dialogs.ShowErrorAsync("Could not launch the game", ex.Message, ex.InnerException?.ToString());
             return;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ModAccessDeniedException)
-        {
-            _logger.LogError(ex, "Mod folders could not be prepared before launch");
-            SetStatus(string.Empty, autoClear: false);
-            await _dialogs.ShowErrorAsync(
-                "Could not prepare the mod folders",
-                "The mod folders could not be checked before launch. If the game is already running, close it and try again.",
-                ex.ToString());
-            return;
-        }
 
         try
         {
@@ -147,6 +148,47 @@ public sealed partial class MainViewModel : ObservableObject
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Process monitor refresh after launch failed");
+        }
+    }
+
+    /// <summary>
+    /// Reconciles the mod store before launch. Access denied offers the permission fix and retries once; when the
+    /// folders still cannot be prepared the user chooses whether to launch anyway. Returns false to abort launch.
+    /// </summary>
+    private async Task<bool> PrepareModFoldersAsync()
+    {
+        var retried = false;
+        while (true)
+        {
+            try
+            {
+                await _mods.ReconcileAsync();
+                return true;
+            }
+            catch (ModAccessDeniedException denied)
+            {
+                _logger.LogWarning(denied, "Mod folders could not be prepared before launch: access denied at {Path}", denied.Path);
+                if (!retried && await _initializer.TryFixPermissionsAsync(denied.Path))
+                {
+                    retried = true;
+                    continue;
+                }
+
+                return await _dialogs.ConfirmAsync(
+                    "Launch without preparing mods?",
+                    $"Windows did not allow {AppInfo.DisplayName} to use the mod folders in{Environment.NewLine}{denied.Path}{Environment.NewLine}{Environment.NewLine}"
+                    + "The game will start with whatever is in the ~mods folder right now.",
+                    "Launch anyway");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                _logger.LogError(ex, "Mod folders could not be prepared before launch");
+                return await _dialogs.ConfirmAsync(
+                    "Launch without preparing mods?",
+                    $"The mod folders could not be checked before launch.{Environment.NewLine}{Environment.NewLine}"
+                    + "The game will start with whatever is in the ~mods folder right now.",
+                    "Launch anyway");
+            }
         }
     }
 

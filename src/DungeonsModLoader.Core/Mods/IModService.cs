@@ -24,6 +24,13 @@ public interface IModService
     /// <summary>True once <see cref="InitializeAsync"/> completed for the current game installation.</summary>
     bool IsInitialized { get; }
 
+    /// <summary>
+    /// The error of the last failed <see cref="InitializeAsync"/> (for example the manifest could not be read or the
+    /// mod folders could not be created), or null when the store is initialized or idle. Set before
+    /// <see cref="Changed"/> is raised so the UI can show a retry affordance instead of an empty list.
+    /// </summary>
+    Exception? InitializationError { get; }
+
     /// <summary>Raised whenever <see cref="Mods"/> or <see cref="UnmanagedFolders"/> changed. May be raised on any thread.</summary>
     event EventHandler? Changed;
 
@@ -76,6 +83,19 @@ public sealed class ModNotFoundException : Exception
 {
     public ModNotFoundException(string message)
         : base(message)
+    {
+    }
+}
+
+/// <summary>
+/// A mod operation could not be completed for a reason the user can act on (folder in use, a folder with the
+/// same name already exists, the result could not be verified). <see cref="Exception.Message"/> is written for
+/// the user and safe to show as-is.
+/// </summary>
+public sealed class ModOperationException : Exception
+{
+    public ModOperationException(string message, Exception? inner = null)
+        : base(message, inner)
     {
     }
 }

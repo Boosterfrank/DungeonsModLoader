@@ -1,11 +1,19 @@
+using System.Text.Json;
 using DungeonsModLoader.Core.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace DungeonsModLoader.Core.Settings;
 
-/// <summary><see cref="ISettingsStore"/> backed by <c>settings.json</c> in the app data folder.</summary>
+/// <summary>
+/// <see cref="ISettingsStore"/> backed by <c>settings.json</c> in the app data folder. Unparseable JSON is set
+/// aside (<c>settings.json.corrupt-&lt;timestamp&gt;</c>) and defaults are used; a file that merely cannot be read right
+/// now (locked, access denied) is retried briefly and then reported, so a valid settings file is never discarded.
+/// </summary>
 public sealed class JsonSettingsStore : ISettingsStore
 {
+    private const int ReadAttempts = 4;
+    private static readonly TimeSpan ReadRetryDelay = TimeSpan.FromMilliseconds(250);
+
     private readonly AppPaths _paths;
     private readonly ILogger<JsonSettingsStore> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -25,17 +33,22 @@ public sealed class JsonSettingsStore : ISettingsStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var loaded = await AtomicJsonFile.ReadAsync<AppSettings>(_paths.SettingsFile, cancellationToken).ConfigureAwait(false);
+            AppSettings? loaded;
+            try
+            {
+                loaded = await ReadWithRetryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is JsonException or NotSupportedException)
+            {
+                // A corrupt settings file must not brick the app: start from defaults and keep the bad file next to
+                // it for diagnosis.
+                _logger.LogWarning(ex, "Settings at {Path} are not valid JSON; starting with defaults", _paths.SettingsFile);
+                TryQuarantine(_paths.SettingsFile);
+                loaded = null;
+            }
+
             Current = loaded ?? new AppSettings();
             _logger.LogDebug("Settings loaded from {Path} (first run completed: {FirstRun})", _paths.SettingsFile, Current.FirstRunCompleted);
-        }
-        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
-        {
-            // A corrupt or unreadable settings file must not brick the app: start from defaults and keep the bad
-            // file next to it for diagnosis.
-            _logger.LogWarning(ex, "Settings could not be read from {Path}; starting with defaults", _paths.SettingsFile);
-            TryQuarantine(_paths.SettingsFile);
-            Current = new AppSettings();
         }
         finally
         {
@@ -57,6 +70,28 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
 
         Saved?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task<AppSettings?> ReadWithRetryAsync(CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await AtomicJsonFile.ReadAsync<AppSettings>(_paths.SettingsFile, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt >= ReadAttempts)
+                {
+                    _logger.LogError(ex, "Settings at {Path} could not be read after {Attempts} attempts", _paths.SettingsFile, attempt);
+                    throw;
+                }
+
+                _logger.LogDebug(ex, "Settings at {Path} could not be read (attempt {Attempt}); retrying", _paths.SettingsFile, attempt);
+                await Task.Delay(ReadRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private void TryQuarantine(string path)

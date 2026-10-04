@@ -12,6 +12,7 @@ public static class SetupFeatureRegistrations
     {
         // One dialog service for the whole app; the themed dialogs it shows are created per call.
         services.AddSingleton<IDialogService, DialogService>();
+        services.AddSingleton<IModStoreInitializer, ModStoreInitializer>();
 
         // The wizard runs once per start at most, so window and view model are created fresh when needed.
         services.AddTransient<SetupViewModel>();

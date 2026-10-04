@@ -67,7 +67,7 @@ public sealed class GameLauncher : IGameLauncher
         catch (Exception ex) when (IsStartFailure(ex))
         {
             _logger.LogError(ex, "Steam launch failed for {Target}", uri);
-            throw new GameLaunchException("Steam is not installed or the steam:// protocol is not registered. Open Steam and try again, or switch to launching the game directly in Settings.", ex);
+            throw new GameLaunchException("Steam is not installed or the steam:// protocol is not registered. Make sure Steam is installed and running, then try again.", ex);
         }
     }
 
@@ -99,7 +99,7 @@ public sealed class GameLauncher : IGameLauncher
         catch (Exception ex) when (IsStartFailure(ex))
         {
             _logger.LogError(ex, "Xbox app launch failed for {Target}", target);
-            throw new GameLaunchException("The Xbox app could not start the game. Check that it is still installed in the Xbox app or the Minecraft Launcher, or switch to launching the game directly in Settings.", ex);
+            throw new GameLaunchException("The Xbox app could not start the game. Check that it is still installed in the Xbox app or the Minecraft Launcher, then try again.", ex);
         }
     }
 

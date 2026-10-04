@@ -141,57 +141,12 @@ public partial class App : Application
 
         _log.Information("Using the stored {Source} installation at {Root}", installation.Source, installation.Root);
         services.GetRequiredService<IGameContext>().Set(installation);
-        await InitializeModStoreAsync(services, installation);
+
+        // Access denied offers the one-time permission fix; other failures show a friendly dialog. Either way
+        // the app continues: the Installed page shows the problem with a retry button.
+        var ready = await services.GetRequiredService<IModStoreInitializer>().InitializeAsync();
+        _log.Information(ready ? "Mod store ready" : "Continuing without a ready mod store");
         return true;
-    }
-
-    /// <summary>
-    /// Prepares the mod store for <paramref name="installation"/>. Access denied offers the one-time permission fix
-    /// and retries once; any other failure is logged and the app continues (the Installed page reports it).
-    /// </summary>
-    private async Task InitializeModStoreAsync(IServiceProvider services, GameInstallation installation)
-    {
-        var mods = services.GetRequiredService<IModService>();
-        try
-        {
-            await mods.InitializeAsync();
-        }
-        catch (ModAccessDeniedException denied)
-        {
-            _log.Warning(denied, "Access denied while preparing the mod folders at {Path}", denied.Path);
-            var dialogs = services.GetRequiredService<IDialogService>();
-            var fix = await dialogs.ConfirmAsync(
-                "Permission needed",
-                $"Windows did not allow changes in {denied.Path}. Grant yourself modify rights on the mod folders? (one-time, asks for administrator approval)",
-                "Fix permissions");
-            if (!fix)
-            {
-                _log.Information("Permission fix declined; continuing without a ready mod store");
-                return;
-            }
-
-            try
-            {
-                var fixer = services.GetRequiredService<IPermissionFixer>();
-                if (await fixer.GrantModifyAccessAsync(installation))
-                {
-                    await mods.InitializeAsync();
-                    _log.Information("Mod store ready after the permission fix");
-                }
-                else
-                {
-                    _log.Information("Permission fix cancelled at the elevation prompt");
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.Error(ex, "The mod store could not be prepared after the permission fix");
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.Error(ex, "The mod store could not be prepared for {Root}", installation.Root);
-        }
     }
 
     private void ShowMainWindow(Window window)

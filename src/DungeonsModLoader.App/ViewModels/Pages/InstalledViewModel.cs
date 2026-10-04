@@ -41,7 +41,7 @@ public sealed partial class InstalledViewModel : PageViewModel
     private readonly IGameProcessMonitor _monitor;
     private readonly ISettingsStore _settings;
     private readonly IDialogService _dialogs;
-    private readonly IPermissionFixer _permissions;
+    private readonly IModStoreInitializer _initializer;
     private readonly IWindowService _windows;
     private readonly ILogger<InstalledViewModel> _logger;
 
@@ -54,7 +54,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         IGameProcessMonitor monitor,
         ISettingsStore settings,
         IDialogService dialogs,
-        IPermissionFixer permissions,
+        IModStoreInitializer initializer,
         IWindowService windows,
         ILogger<InstalledViewModel> logger)
     {
@@ -63,7 +63,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         _monitor = monitor;
         _settings = settings;
         _dialogs = dialogs;
-        _permissions = permissions;
+        _initializer = initializer;
         _windows = windows;
         _logger = logger;
 
@@ -161,8 +161,44 @@ public sealed partial class InstalledViewModel : PageViewModel
     [NotifyPropertyChangedFor(nameof(ShowEmptyState))]
     private bool _hasAnyRows;
 
-    /// <summary>No mods at all (neither managed nor unmanaged): show the "No mods installed yet" call to action.</summary>
-    public bool ShowEmptyState => !HasAnyRows;
+    /// <summary>The mod store could not be prepared (manifest unreadable, folders not accessible): show an error with a retry.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowEmptyState))]
+    private bool _showInitError;
+
+    [ObservableProperty]
+    private string _initErrorText = string.Empty;
+
+    /// <summary>No mods at all (neither managed nor unmanaged) and no error: show the "No mods installed yet" call to action.</summary>
+    public bool ShowEmptyState => !HasAnyRows && !ShowInitError;
+
+    /// <summary>Tries to prepare the mod store again (offers the permission fix when access is denied).</summary>
+    [RelayCommand]
+    private Task RetryInitializeAsync() =>
+        RunBusyAsync("Preparing the mod list...", async () =>
+        {
+            var ready = await _initializer.InitializeAsync();
+            _logger.LogInformation("Mod store retry from the Installed page: ready = {Ready}", ready);
+        });
+
+    /// <summary>
+    /// Re-checks the lock after a dialog returned: the game may have started while the dialog was open.
+    /// Returns false (after telling the user) when mod changes are not allowed right now.
+    /// </summary>
+    private async Task<bool> EnsureCanMutateAsync()
+    {
+        if (CanMutate)
+        {
+            return true;
+        }
+
+        if (IsGameRunning)
+        {
+            await _dialogs.ShowInfoAsync("Game running", $"{AppInfo.GameDisplayName} is running. Close it before changing mods.");
+        }
+
+        return false;
+    }
 
     /// <summary>There are mods, but none passes the current search / filter.</summary>
     [ObservableProperty]
@@ -245,7 +281,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         var previous = row.DisplayName;
         var input = await _dialogs.PromptAsync("Rename mod", "Display name", previous, "Rename");
         var name = input?.Trim();
-        if (string.IsNullOrEmpty(name) || string.Equals(name, previous, StringComparison.Ordinal))
+        if (string.IsNullOrEmpty(name) || string.Equals(name, previous, StringComparison.Ordinal) || !await EnsureCanMutateAsync())
         {
             return;
         }
@@ -282,7 +318,7 @@ public sealed partial class InstalledViewModel : PageViewModel
             "The mod folder and its files will be deleted. This cannot be undone.",
             "Uninstall",
             isDestructive: true);
-        if (!confirmed)
+        if (!confirmed || !await EnsureCanMutateAsync())
         {
             return;
         }
@@ -311,7 +347,7 @@ public sealed partial class InstalledViewModel : PageViewModel
             $"Remove {row.DisplayName}?",
             "The mod folder is already gone. This removes the remaining entry from your mod list.",
             "Remove");
-        if (!confirmed)
+        if (!confirmed || !await EnsureCanMutateAsync())
         {
             return;
         }
@@ -489,11 +525,21 @@ public sealed partial class InstalledViewModel : PageViewModel
                 await _dialogs.ShowErrorAsync(failureTitle, AccessDeniedMessage, ex.ToString());
                 return false;
             }
-            catch (Exception ex) when (ex is ModNotFoundException or IOException or InvalidOperationException)
+            catch (Exception ex) when (ex is ModNotFoundException or ModOperationException or InvalidOperationException)
             {
                 // The mod store phrases these for the user ("folder is in use", "already managed", "not found").
                 _logger.LogWarning(ex, "{Title}: {Reason}", failureTitle, ex.Message);
                 await _dialogs.ShowErrorAsync(failureTitle, ex.Message, ex.ToString());
+                return false;
+            }
+            catch (IOException ex)
+            {
+                // Raw file-system text ("The process cannot access the file ...") is not for the user.
+                _logger.LogWarning(ex, "{Title}: {Reason}", failureTitle, ex.Message);
+                await _dialogs.ShowErrorAsync(
+                    failureTitle,
+                    "The mod files could not be changed. Close the game and any program that is using them, then try again.",
+                    ex.ToString());
                 return false;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -506,41 +552,7 @@ public sealed partial class InstalledViewModel : PageViewModel
     }
 
     /// <summary>Offers the one-time elevated permission fix; true when it ran successfully.</summary>
-    private async Task<bool> TryFixPermissionsAsync(string? deniedPath)
-    {
-        var installation = _game.Current;
-        if (installation is null)
-        {
-            return false;
-        }
-
-        var location = deniedPath ?? installation.ModsDirectory;
-        var fix = await _dialogs.ConfirmAsync(
-            "Permission needed",
-            $"Windows did not allow changes to the mod folder:{Environment.NewLine}{location}{Environment.NewLine}{Environment.NewLine}"
-            + $"{AppInfo.DisplayName} can give your account permission to change the mod folders. Windows will ask for administrator approval once.",
-            "Fix permissions");
-        if (!fix)
-        {
-            return false;
-        }
-
-        try
-        {
-            var granted = await _permissions.GrantModifyAccessAsync(installation);
-            _logger.LogInformation(granted ? "Permission fix applied" : "Permission fix cancelled at the elevation prompt");
-            return granted;
-        }
-        catch (PermissionFixException ex)
-        {
-            _logger.LogError(ex, "Permission fix failed");
-            await _dialogs.ShowErrorAsync(
-                "Could not fix permissions",
-                "The permission change did not complete. Try again, or give your account modify rights on the game's Paks folder by hand.",
-                ex.ToString());
-            return false;
-        }
-    }
+    private Task<bool> TryFixPermissionsAsync(string? deniedPath) => _initializer.TryFixPermissionsAsync(deniedPath);
 
     // ----------------------------------------------------------------------------------------------------------
     // Rows
@@ -558,6 +570,15 @@ public sealed partial class InstalledViewModel : PageViewModel
         var mods = _mods.Mods;
         var unmanaged = _mods.UnmanagedFolders;
         var modsDirectory = _game.Current?.ModsDirectory;
+
+        var error = _mods.InitializationError;
+        ShowInitError = error is not null && _game.Current is not null;
+        InitErrorText = error switch
+        {
+            null => string.Empty,
+            ModAccessDeniedException denied => $"Windows did not allow {AppInfo.DisplayName} to use the mod folders in {denied.Path}.",
+            _ => "The mod list could not be loaded. Make sure the game folder and the app data folder are accessible.",
+        };
 
         var desired = new List<ModRowViewModel>(mods.Count + unmanaged.Count);
         var seen = new HashSet<string>(StringComparer.Ordinal);

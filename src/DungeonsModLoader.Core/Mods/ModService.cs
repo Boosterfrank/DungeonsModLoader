@@ -42,6 +42,8 @@ public sealed class ModService : IModService, IDisposable
 
     public bool IsInitialized { get; private set; }
 
+    public Exception? InitializationError { get; private set; }
+
     public event EventHandler? Changed;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -53,15 +55,30 @@ public sealed class ModService : IModService, IDisposable
             var installation = _gameContext.Current;
             if (installation is null)
             {
-                raise = ClearStateCore();
+                raise = ClearStateCore() | InitializationError is not null;
+                InitializationError = null;
                 _logger.LogInformation("No game installation configured; mod store is idle");
             }
             else
             {
                 _logger.LogInformation("Initializing mod store for {Root}", installation.Root);
-                _manifest = await _manifestStore.LoadAsync(cancellationToken).ConfigureAwait(false);
-                await Task.Run(() => ReconcileCore(installation), cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    _manifest = await _manifestStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+                    await Task.Run(() => ReconcileCore(installation), cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Never keep a previous installation's mods on screen after a failed switch: clear everything,
+                    // remember why, tell listeners, then let the caller handle the error.
+                    ClearStateCore();
+                    InitializationError = ex;
+                    _logger.LogError(ex, "The mod store could not be initialized for {Root}", installation.Root);
+                    throw;
+                }
+
                 IsInitialized = true;
+                InitializationError = null;
                 raise = true;
                 _logger.LogInformation(
                     "Mod store ready: {Managed} managed mods ({Missing} missing), {Unmanaged} unmanaged folders",
@@ -70,11 +87,14 @@ public sealed class ModService : IModService, IDisposable
                     _unmanaged.Length);
             }
         }
-        finally
+        catch
         {
             _gate.Release();
+            RaiseChanged();
+            throw;
         }
 
+        _gate.Release();
         if (raise)
         {
             RaiseChanged();
@@ -187,34 +207,41 @@ public sealed class ModService : IModService, IDisposable
             throw new ArgumentException($"'{folderName}' is not a valid folder name.", nameof(folderName));
         }
 
+        // Phase 1 (under the gate): validate. Phase 2 (outside): hash, which can take a while for big mods and must
+        // not block toggles, reconcile or launch. Phase 3 (under the gate): re-validate and record.
+        string folderPath;
+        string actualName;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var installation = RequireInstallation();
+            folderPath = Path.Combine(installation.ModsDirectory, folderName);
+            EnsureUnmanagedFolder(installation, folderName, folderPath);
+
+            // Record the folder name exactly as the file system spells it.
+            actualName = GetActualFolderName(installation.ModsDirectory, folderName);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        List<ModFileRecord> files;
+        try
+        {
+            files = await Task.Run(() => FileHasher.HashDirectoryAsync(folderPath, cancellationToken), cancellationToken).ConfigureAwait(false);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new ModAccessDeniedException(folderPath, ex);
+        }
+
         ModEntry entry;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var installation = RequireInstallation();
-            var folderPath = Path.Combine(installation.ModsDirectory, folderName);
-            if (!Directory.Exists(folderPath))
-            {
-                throw new ModNotFoundException($"There is no folder named '{folderName}' in {installation.ModsDirectory}.");
-            }
-
-            var existing = _manifest.Mods.FirstOrDefault(m => string.Equals(m.FolderName, folderName, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null)
-            {
-                throw new InvalidOperationException($"The folder '{folderName}' is already managed as '{existing.DisplayName}'.");
-            }
-
-            // Record the folder name exactly as the file system spells it.
-            var actualName = GetActualFolderName(installation.ModsDirectory, folderName);
-            List<ModFileRecord> files;
-            try
-            {
-                files = await FileHasher.HashDirectoryAsync(folderPath, cancellationToken).ConfigureAwait(false);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new ModAccessDeniedException(folderPath, ex);
-            }
+            EnsureUnmanagedFolder(installation, folderName, folderPath);
 
             var now = DateTimeOffset.UtcNow;
             entry = new ModEntry
@@ -228,8 +255,7 @@ public sealed class ModService : IModService, IDisposable
             };
 
             _manifest.Mods.Add(entry);
-            await _manifestStore.SaveAsync(_manifest, cancellationToken).ConfigureAwait(false);
-            RefreshSnapshotCore(installation);
+            await SaveManifestOrRevertAsync(() => _manifest.Mods.Remove(entry), installation, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Imported unmanaged folder '{Folder}' as '{Mod}' ({Files} files)", actualName, entry.DisplayName, files.Count);
         }
         finally
@@ -239,6 +265,58 @@ public sealed class ModService : IModService, IDisposable
 
         RaiseChanged();
         return entry;
+    }
+
+    /// <summary>Throws when <paramref name="folderName"/> is not an existing, not-yet-managed folder inside <c>~mods</c>.</summary>
+    private void EnsureUnmanagedFolder(GameInstallation installation, string folderName, string folderPath)
+    {
+        if (!Directory.Exists(folderPath))
+        {
+            throw new ModNotFoundException($"There is no folder named '{folderName}' in {installation.ModsDirectory}.");
+        }
+
+        var existing = _manifest.Mods.FirstOrDefault(m => string.Equals(m.FolderName, folderName, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            throw new InvalidOperationException($"The folder '{folderName}' is already managed as '{existing.DisplayName}'.");
+        }
+    }
+
+    /// <summary>
+    /// Saves the manifest and refreshes the snapshot. When the save fails the in-memory change is undone first
+    /// (via <paramref name="revert"/>) so the UI never shows a state that is not on disk. Runs under the gate.
+    /// </summary>
+    private async Task SaveManifestOrRevertAsync(Action revert, GameInstallation installation, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _manifestStore.SaveAsync(_manifest, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "The manifest could not be saved; the change was undone");
+            revert();
+            throw new ModOperationException(
+                "The change could not be saved to the mod list (manifest.json). Make sure the app data folder is writable and try again.",
+                ex);
+        }
+        finally
+        {
+            TryRefreshSnapshot(installation);
+        }
+    }
+
+    /// <summary>Refreshes the snapshot without letting a disk problem mask the original outcome of an operation.</summary>
+    private void TryRefreshSnapshot(GameInstallation installation)
+    {
+        try
+        {
+            RefreshSnapshotCore(installation);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ModAccessDeniedException)
+        {
+            _logger.LogWarning(ex, "The mod snapshot could not be refreshed");
+        }
     }
 
     public async Task RenameAsync(Guid modId, string displayName, CancellationToken cancellationToken = default)
@@ -260,10 +338,18 @@ public sealed class ModService : IModService, IDisposable
             }
 
             _logger.LogInformation("Renaming '{Old}' to '{New}'", entry.DisplayName, trimmed);
+            var previousName = entry.DisplayName;
+            var previousUpdatedAt = entry.UpdatedAt;
             entry.DisplayName = trimmed;
             entry.UpdatedAt = DateTimeOffset.UtcNow;
-            await _manifestStore.SaveAsync(_manifest, cancellationToken).ConfigureAwait(false);
-            RefreshSnapshotCore(installation);
+            await SaveManifestOrRevertAsync(
+                () =>
+                {
+                    entry.DisplayName = previousName;
+                    entry.UpdatedAt = previousUpdatedAt;
+                },
+                installation,
+                cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -281,14 +367,8 @@ public sealed class ModService : IModService, IDisposable
             var installation = RequireInstallation();
             var entry = RequireEntry(modId);
 
-            // A manifest entry with anything but a plain folder name could point outside the mod folders.
-            // Refuse loudly rather than guess: nothing is deleted and the entry stays for inspection.
-            if (!IsPlainFolderName(entry.FolderName))
-            {
-                throw new InvalidOperationException(
-                    $"Refusing to uninstall '{entry.DisplayName}': its folder name '{entry.FolderName}' is not a plain folder name inside the mod folders.");
-            }
-
+            // An entry whose folder name is not a plain name is always reported Missing (ComputeState), so it is
+            // removed from the manifest without touching the disk: nothing outside the mod folders is ever deleted.
             var state = ComputeState(installation, entry, warnOnDuplicate: false);
             if (state != ModState.Missing)
             {
@@ -299,12 +379,15 @@ public sealed class ModService : IModService, IDisposable
             }
             else
             {
-                _logger.LogInformation("Uninstalling missing mod '{Mod}': removing the manifest entry only", entry.DisplayName);
+                _logger.LogInformation("Uninstalling missing mod '{Mod}' ({Folder}): removing the manifest entry only", entry.DisplayName, entry.FolderName);
             }
 
+            var index = _manifest.Mods.IndexOf(entry);
             _manifest.Mods.Remove(entry);
-            await _manifestStore.SaveAsync(_manifest, cancellationToken).ConfigureAwait(false);
-            RefreshSnapshotCore(installation);
+            await SaveManifestOrRevertAsync(
+                () => _manifest.Mods.Insert(Math.Clamp(index, 0, _manifest.Mods.Count), entry),
+                installation,
+                cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Uninstalled '{Mod}' ({Folder})", entry.DisplayName, entry.FolderName);
         }
         finally
@@ -538,7 +621,7 @@ public sealed class ModService : IModService, IDisposable
 
         if (Directory.Exists(target))
         {
-            throw new IOException($"A folder named '{entry.FolderName}' already exists in {targetParent}.");
+            throw new ModOperationException($"A folder named '{entry.FolderName}' already exists in {targetParent}. Remove or rename it, then try again.");
         }
 
         EnsureDirectory(targetParent);
@@ -560,14 +643,14 @@ public sealed class ModService : IModService, IDisposable
                 throw new ModAccessDeniedException(source, ex);
             }
 
-            throw new IOException(
+            throw new ModOperationException(
                 $"The folder '{entry.FolderName}' is in use and could not be moved. Close the game and any program using its files, then try again.",
                 ex);
         }
 
         if (Directory.Exists(source) || !Directory.Exists(target))
         {
-            throw new IOException($"The move of '{entry.FolderName}' could not be verified: the folder is not where it should be.");
+            throw new ModOperationException($"The move of '{entry.FolderName}' could not be verified: the folder is not where it should be.");
         }
     }
 
@@ -610,7 +693,7 @@ public sealed class ModService : IModService, IDisposable
 
         if (Directory.Exists(full))
         {
-            throw new IOException($"The folder '{full}' could not be deleted completely.");
+            throw new ModOperationException($"The folder '{full}' could not be deleted completely. Close any program using its files and try again.");
         }
     }
 

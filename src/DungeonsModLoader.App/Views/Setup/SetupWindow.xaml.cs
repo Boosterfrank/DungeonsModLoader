@@ -40,6 +40,9 @@ public partial class SetupWindow : Window
 
     private void OnCloseRequested(object? sender, bool result)
     {
+        // Never run from inside OnClosing: the view model asks for confirmation first, and that confirmation is
+        // started after the Closing handler has returned (see OnClosing), so setting DialogResult here closes
+        // the window through the normal path.
         _closeRequested = true;
         try
         {
@@ -59,12 +62,17 @@ public partial class SetupWindow : Window
             return;
         }
 
-        // The X button / Alt+F4: the wizard decides (it asks for confirmation and may be busy with file work).
+        // The X button / Alt+F4: keep the window open for now and let the wizard decide (it asks for confirmation
+        // and may be busy with file work). The command must run AFTER this handler returns: a modal confirmation
+        // inside Closing, followed by DialogResult = false, would re-enter the close pipeline and wedge the window.
         e.Cancel = true;
-        if (_viewModel.CancelCommand.CanExecute(null))
+        Dispatcher.BeginInvoke(() =>
         {
-            _viewModel.CancelCommand.Execute(null);
-        }
+            if (!_closeRequested && _viewModel.CancelCommand.CanExecute(null))
+            {
+                _viewModel.CancelCommand.Execute(null);
+            }
+        });
     }
 
     private void OnClosed(object? sender, EventArgs e)

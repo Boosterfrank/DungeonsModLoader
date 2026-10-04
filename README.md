@@ -1,6 +1,6 @@
 # DungeonsModLoader
 
-A Windows mod manager for **Minecraft Dungeons II** (Steam) with **Nexus Mods** as its online mod library.
+A Windows mod manager for **Minecraft Dungeons II** (Steam, Xbox app / Minecraft Launcher) with **Nexus Mods** as its online mod library.
 
 > Status: in development. See the milestone list below.
 
@@ -41,6 +41,7 @@ installer/
 
 ## How mods are stored
 
+- Game root: for Steam `...\steamapps\common\Minecraft Dungeons II`, for the Xbox app / Minecraft Launcher `...\XboxGames\Minecraft Dungeons II\Content` (both contain the `Dungeons` folder)
 - Enabled mods: `<GameRoot>\Dungeons\Content\Paks\~mods\<ModFolder>\`
 - Disabled mods: `<GameRoot>\Dungeons\DungeonsModLoader_Disabled\<ModFolder>\` (same drive, outside `Paks`, so the game ignores them)
 - App data: `%LOCALAPPDATA%\DungeonsModLoader\` (`settings.json`, `manifest.json`, `profiles\`, `cache\`, `downloads\`, `logs\`, `backups\`)

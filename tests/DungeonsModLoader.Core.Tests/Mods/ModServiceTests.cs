@@ -197,7 +197,7 @@ public class ModServiceTests
             var entry = await ImportAsync(service, "ModA");
             Directory.CreateDirectory(temp.DisabledPath("ModA"));
 
-            var ex = await Assert.ThrowsAsync<IOException>(() => service.SetEnabledAsync(entry.Id, false));
+            var ex = await Assert.ThrowsAsync<ModOperationException>(() => service.SetEnabledAsync(entry.Id, false));
 
             Assert.Contains("already exists", ex.Message);
             Assert.True(Directory.Exists(temp.EnabledPath("ModA")));
@@ -331,12 +331,16 @@ public class ModServiceTests
             await service.InitializeAsync();
 
             Assert.Equal(ModState.Missing, service.Find(tampered.Id)!.State);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => service.UninstallAsync(tampered.Id));
             await Assert.ThrowsAsync<ModNotFoundException>(() => service.SetEnabledAsync(tampered.Id, false));
+
+            // A tampered entry is always "missing", so uninstalling it only drops the manifest entry: nothing
+            // outside the mod folders is ever touched, and the user is not stuck with an unremovable row.
+            await service.UninstallAsync(tampered.Id);
 
             Assert.True(File.Exists(gameFile));
             Assert.True(Directory.Exists(temp.PaksDirectory));
-            Assert.NotNull(service.Find(tampered.Id));
+            Assert.Null(service.Find(tampered.Id));
+            Assert.Empty((await store.LoadAsync()).Mods);
         }
     }
 
@@ -396,7 +400,8 @@ public class ModServiceTests
 
             var failure = Assert.Single(failures);
             Assert.Same(b, failure.Mod);
-            Assert.IsAssignableFrom<IOException>(failure.Error);
+            var inUse = Assert.IsType<ModOperationException>(failure.Error);
+            Assert.Contains("in use", inUse.Message);
             Assert.Equal(ModState.Disabled, service.Find(a.Id)!.State);
             Assert.Equal(ModState.Enabled, service.Find(b.Id)!.State);
             Assert.Equal(ModState.Disabled, service.Find(c.Id)!.State);

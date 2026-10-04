@@ -99,7 +99,13 @@ public sealed record GameInstallation
     /// <summary>Full path of the executable to start for a manual launch, or null if none exists.</summary>
     public string? FindLaunchExecutable()
     {
-        foreach (var name in KnownExecutableNames)
+        // Executables discovered on disk first (launcher stub before the shipping binary), then the known names.
+        var names = ExecutableNames
+            .Concat(KnownExecutableNames)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in names)
         {
             foreach (var dir in new[] { Root, Path.Combine(Root, "Dungeons", "Binaries", "Win64") })
             {
