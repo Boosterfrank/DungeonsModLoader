@@ -1,6 +1,8 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using DungeonsModLoader.App.Services;
 
 namespace DungeonsModLoader.App.Views.Dialogs;
 
@@ -15,6 +17,9 @@ public enum MessageDialogKind
 
     /// <summary>A question: cancel + confirm buttons; the dialog result says which one was chosen.</summary>
     Confirm,
+
+    /// <summary>A question with one button per <see cref="MessageDialogOptions.Choices"/> entry; <see cref="MessageDialog.ChosenId"/> says which.</summary>
+    Choice,
 }
 
 /// <summary>Everything <see cref="MessageDialog.Present"/> needs to fill the dialog.</summary>
@@ -33,6 +38,9 @@ public sealed class MessageDialogOptions
     /// <summary>Renders the confirm button in the danger style (and focuses cancel, so Enter is the safe choice).</summary>
     public bool IsDestructive { get; init; }
 
+    /// <summary>The buttons of a <see cref="MessageDialogKind.Choice"/> dialog, left to right.</summary>
+    public IReadOnlyList<DialogChoice>? Choices { get; init; }
+
     /// <summary>
     /// Invoked by "Open logs folder"; the button is shown for errors with details when this is set. The dialog
     /// itself stays dependency-free, so the caller (the dialog service) supplies the shell action.
@@ -41,14 +49,17 @@ public sealed class MessageDialogOptions
 }
 
 /// <summary>
-/// Themed replacement for <c>MessageBox</c>: info, error (with expandable details) and confirm dialogs.
-/// Dependency-free; <see cref="Services.DialogService"/> creates it, fills it with <see cref="Present"/>
-/// and shows it modally. <see cref="Confirmed"/> is true when the primary action was chosen.
+/// Themed replacement for <c>MessageBox</c>: info, error (with expandable details), confirm and multi-choice
+/// dialogs. Dependency-free; <see cref="Services.DialogService"/> creates it, fills it with <see cref="Present"/>
+/// and shows it modally. <see cref="Confirmed"/> is true when the primary action was chosen;
+/// <see cref="ChosenId"/> names the chosen button of a choice dialog.
 /// </summary>
 public partial class MessageDialog : Window
 {
     private Action? _openLogsFolder;
     private bool _focusCancel;
+    private bool _isChoice;
+    private Button? _focusTarget;
 
     public MessageDialog()
     {
@@ -57,6 +68,9 @@ public partial class MessageDialog : Window
 
     /// <summary>True when the confirm/OK button was pressed; false for cancel, Esc or closing the window.</summary>
     public bool Confirmed { get; private set; }
+
+    /// <summary>The <see cref="DialogChoice.Id"/> of the chosen button; null when dismissed with Esc or closed.</summary>
+    public string? ChosenId { get; private set; }
 
     /// <summary>Fills the dialog without showing it.</summary>
     public void Present(MessageDialogOptions options)
@@ -107,7 +121,55 @@ public partial class MessageDialog : Window
                 ConfirmButton.IsCancel = false;
                 _focusCancel = options.IsDestructive;
                 break;
+
+            case MessageDialogKind.Choice:
+                SetIcon("?", "Brush.Accent.Light", "Brush.Accent.Faint");
+                CancelButton.Visibility = Visibility.Collapsed;
+                OpenLogsButton.Visibility = Visibility.Collapsed;
+                ConfirmButton.Visibility = Visibility.Collapsed;
+                ConfirmButton.IsDefault = false;
+                ConfirmButton.IsCancel = false;
+                _isChoice = true;
+                AddChoiceButtons(options.Choices ?? Array.Empty<DialogChoice>());
+                break;
         }
+    }
+
+    /// <summary>One button per choice, appended to the footer in order; the primary one is the default (Enter).</summary>
+    private void AddChoiceButtons(IReadOnlyList<DialogChoice> choices)
+    {
+        if (choices.Count == 0)
+        {
+            throw new ArgumentException("A choice dialog needs at least one choice.", nameof(choices));
+        }
+
+        Button? lastButton = null;
+        for (var i = 0; i < choices.Count; i++)
+        {
+            var choice = choices[i];
+            var styleKey = choice.IsDestructive ? "Button.Danger" : choice.IsPrimary ? "Button.Primary" : "Button.Secondary";
+            var button = new Button
+            {
+                Content = choice.Text,
+                Tag = choice.Id,
+                MinWidth = 100,
+                Margin = new Thickness(i == 0 ? 0 : 8, 0, 0, 0),
+                Style = (Style)FindResource(styleKey),
+                IsDefault = choice.IsPrimary,
+            };
+            button.Click += OnChoiceClick;
+            ActionsPanel.Children.Add(button);
+
+            if (choice.IsPrimary && _focusTarget is null)
+            {
+                _focusTarget = button;
+            }
+
+            lastButton = button;
+        }
+
+        // No primary choice: focus the right-most button, which is the conventional place for the safe action.
+        _focusTarget ??= lastButton;
     }
 
     private void SetIcon(string glyph, string foregroundKey, string backgroundKey)
@@ -122,7 +184,11 @@ public partial class MessageDialog : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         Activate();
-        if (_focusCancel)
+        if (_focusTarget is not null)
+        {
+            _focusTarget.Focus();
+        }
+        else if (_focusCancel)
         {
             CancelButton.Focus();
         }
@@ -130,6 +196,22 @@ public partial class MessageDialog : Window
         {
             ConfirmButton.Focus();
         }
+    }
+
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        // Choice dialogs have no IsCancel button (every button is a real answer), so Esc is handled here: it
+        // dismisses the dialog with no choice.
+        if (_isChoice && e.Key == Key.Escape)
+        {
+            ChosenId = null;
+            Confirmed = false;
+            DialogResult = false;
+            e.Handled = true;
+            return;
+        }
+
+        base.OnPreviewKeyDown(e);
     }
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -171,5 +253,12 @@ public partial class MessageDialog : Window
     {
         Confirmed = false;
         DialogResult = false;
+    }
+
+    private void OnChoiceClick(object sender, RoutedEventArgs e)
+    {
+        ChosenId = (sender as Button)?.Tag as string;
+        Confirmed = ChosenId is not null;
+        DialogResult = true;
     }
 }

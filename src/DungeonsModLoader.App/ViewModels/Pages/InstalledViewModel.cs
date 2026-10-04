@@ -26,15 +26,19 @@ public enum ModFilter
 }
 
 /// <summary>
-/// Installed page: the mod list with enable/disable, import of unmanaged folders, rename and uninstall.
-/// Rows mirror <see cref="IModService.Mods"/> + <see cref="IModService.UnmanagedFolders"/> and are updated in place
-/// (matched by id / folder name) whenever the service reports a change, so toggles never jump. Every mod-changing
-/// action is locked while the game is running or a long operation is in progress.
+/// Installed page: the mod list with enable/disable, install from file, import of unmanaged folders, rename and
+/// uninstall. Rows mirror <see cref="IModService.Mods"/> + <see cref="IModService.UnmanagedFolders"/> and are
+/// updated in place (matched by id / folder name) whenever the service reports a change, so toggles never jump.
+/// Every mod-changing action is locked while the game is running or a long operation is in progress.
 /// </summary>
 public sealed partial class InstalledViewModel : PageViewModel
 {
     private const string AccessDeniedMessage =
         "Windows did not allow changes to the mod folder. Fix the folder permissions and try again.";
+
+    /// <summary>Win32 filter of the "Install from file..." picker: everything the install pipeline accepts.</summary>
+    private const string InstallFileFilter =
+        "Mod packages (*.zip;*.7z;*.rar;*.pak;*.ucas;*.utoc)|*.zip;*.7z;*.rar;*.pak;*.ucas;*.utoc|All files (*.*)|*.*";
 
     private readonly IModService _mods;
     private readonly IGameContext _game;
@@ -42,6 +46,7 @@ public sealed partial class InstalledViewModel : PageViewModel
     private readonly ISettingsStore _settings;
     private readonly IDialogService _dialogs;
     private readonly IModStoreInitializer _initializer;
+    private readonly IInstallCoordinator _installs;
     private readonly IWindowService _windows;
     private readonly ILogger<InstalledViewModel> _logger;
 
@@ -55,6 +60,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         ISettingsStore settings,
         IDialogService dialogs,
         IModStoreInitializer initializer,
+        IInstallCoordinator installs,
         IWindowService windows,
         ILogger<InstalledViewModel> logger)
     {
@@ -64,6 +70,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         _settings = settings;
         _dialogs = dialogs;
         _initializer = initializer;
+        _installs = installs;
         _windows = windows;
         _logger = logger;
 
@@ -208,17 +215,19 @@ public sealed partial class InstalledViewModel : PageViewModel
     [NotifyPropertyChangedFor(nameof(CanMutate))]
     [NotifyCanExecuteChangedFor(nameof(EnableAllCommand))]
     [NotifyCanExecuteChangedFor(nameof(DisableAllCommand))]
+    [NotifyCanExecuteChangedFor(nameof(InstallFromFileCommand))]
     [NotifyCanExecuteChangedFor(nameof(ImportCommand))]
     [NotifyCanExecuteChangedFor(nameof(RenameCommand))]
     [NotifyCanExecuteChangedFor(nameof(UninstallCommand))]
     [NotifyCanExecuteChangedFor(nameof(RemoveMissingCommand))]
     private bool _isGameRunning;
 
-    /// <summary>A long operation (bulk enable/disable, import, uninstall) is running; the list is locked meanwhile.</summary>
+    /// <summary>A long operation (bulk enable/disable, install, import, uninstall) is running; the list is locked meanwhile.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanMutate))]
     [NotifyCanExecuteChangedFor(nameof(EnableAllCommand))]
     [NotifyCanExecuteChangedFor(nameof(DisableAllCommand))]
+    [NotifyCanExecuteChangedFor(nameof(InstallFromFileCommand))]
     [NotifyCanExecuteChangedFor(nameof(ImportCommand))]
     [NotifyCanExecuteChangedFor(nameof(RenameCommand))]
     [NotifyCanExecuteChangedFor(nameof(UninstallCommand))]
@@ -244,6 +253,28 @@ public sealed partial class InstalledViewModel : PageViewModel
 
     [RelayCommand(CanExecute = nameof(CanMutate))]
     private Task DisableAllAsync() => SetAllAsync(enabled: false);
+
+    /// <summary>
+    /// "Install from file...": picks archives / mod files with the system dialog and hands them to the install
+    /// coordinator, which shows the progress, picker and conflict dialogs. The list is locked meanwhile and
+    /// refreshes through <see cref="IModService.Changed"/>.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanMutate))]
+    private async Task InstallFromFileAsync()
+    {
+        var files = _dialogs.PickFiles("Install mods", InstallFileFilter, multiSelect: true);
+        if (files.Count == 0 || !await EnsureCanMutateAsync())
+        {
+            return;
+        }
+
+        _logger.LogInformation("Installing {Count} picked file(s)", files.Count);
+        await RunBusyAsync("Installing mods...", async () =>
+        {
+            var installed = await _installs.InstallFromPathsAsync(files);
+            _logger.LogInformation("Install from file finished: {Count} mod(s) installed", installed.Count);
+        });
+    }
 
     [RelayCommand(CanExecute = nameof(CanImport))]
     private async Task ImportAsync(ModRowViewModel? row)

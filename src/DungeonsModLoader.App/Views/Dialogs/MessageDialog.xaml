@@ -13,7 +13,7 @@
         Loaded="OnLoaded">
 
   <!--
-    Themed message box (Info / Error / Confirm). Same anatomy as CrashDialog: borderless, draggable header,
+    Themed message box (Info / Error / Confirm / Choice). Same anatomy as CrashDialog: borderless, draggable header,
     body, footer with right-aligned actions, extruded bottom edge. Filled from code-behind (Present).
   -->
   <WindowChrome.WindowChrome>
@@ -146,10 +146,10 @@
                  Visibility="{Binding IsChecked, ElementName=DetailsToggle, Converter={StaticResource MessageDialog.BoolToVisibility}}" />
       </StackPanel>
 
-      <!-- Footer: actions right-aligned; the single primary action sits last. -->
+      <!-- Footer: actions right-aligned; the single primary action sits last. Choice dialogs append their buttons here. -->
       <Border Grid.Row="2" Background="{StaticResource Brush.Bg.PanelAlt}"
               BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="24,16">
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel x:Name="ActionsPanel" Orientation="Horizontal" HorizontalAlignment="Right">
           <Button x:Name="OpenLogsButton" Content="Open logs folder" Visibility="Collapsed"
                   Style="{DynamicResource Button.Secondary}" MinWidth="120" Margin="0,0,8,0"
                   Click="OnOpenLogsClick" />
