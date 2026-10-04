@@ -561,6 +561,9 @@ public sealed class ModService : IModService, IDisposable
     /// <summary>Prefix of the app's own temporary folders (install staging); never shown as mods, deleted when stale.</summary>
     public const string InternalFolderPrefix = ".dml-";
 
+    /// <summary>Internal folders younger than this are left alone by <see cref="CleanupInternalFolders"/>.</summary>
+    private static readonly TimeSpan InternalFolderGraceperiod = TimeSpan.FromHours(1);
+
     private static bool IsInternalFolder(string name) => name.StartsWith(InternalFolderPrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Removes build folders a crashed install left behind in either mod folder.</summary>
@@ -572,6 +575,12 @@ public sealed class ModService : IModService, IDisposable
             {
                 foreach (var directory in Directory.EnumerateDirectories(parent, InternalFolderPrefix + "*"))
                 {
+                    // Only folders that are clearly abandoned: a second app instance may be building one right now.
+                    if (Directory.GetLastWriteTimeUtc(directory) > DateTime.UtcNow - InternalFolderGraceperiod)
+                    {
+                        continue;
+                    }
+
                     _logger.LogInformation("Removing leftover install folder {Path}", directory);
                     Directory.Delete(directory, recursive: true);
                 }
@@ -764,7 +773,7 @@ public sealed class ModService : IModService, IDisposable
         }
     }
 
-    private static void ClearReadOnlyAttributes(string directory)
+    internal static void ClearReadOnlyAttributes(string directory)
     {
         var info = new DirectoryInfo(directory);
         foreach (var entry in info.EnumerateFileSystemInfos("*", SearchOption.AllDirectories))

@@ -40,6 +40,15 @@ public sealed class ModInstaller : IModInstaller
                 throw new InstallPackageException($"The folder '{folder}' does not exist.");
             }
 
+            // A folder source is used in place (no staging copy), so it must never be part of the game
+            // installation: not the game root, not a folder above it, and not something already in ~mods.
+            var root = _game.Current?.Root;
+            if (root is not null && (IsSameOrUnder(folder, root) || IsSameOrUnder(root, folder)))
+            {
+                throw new InstallPackageException(
+                    $"'{Path.GetFileName(folder)}' is inside the game installation. To manage a folder that is already in ~mods, use Import on the Installed page.");
+            }
+
             contentRoot = folder;
         }
         else
@@ -78,7 +87,7 @@ public sealed class ModInstaller : IModInstaller
         try
         {
             progress?.Report(new InstallProgress("Looking for mod files..."));
-            var contents = await Task.Run(() => ModPackageInspector.Inspect(contentRoot), cancellationToken).ConfigureAwait(false);
+            var contents = await Task.Run(() => ModPackageInspector.Inspect(contentRoot, cancellationToken), cancellationToken).ConfigureAwait(false);
             if (!contents.Candidates.Any(c => c.FileSets.Any(s => s.IsValid)))
             {
                 var detail = contents.Candidates.Count > 0
@@ -122,13 +131,12 @@ public sealed class ModInstaller : IModInstaller
         var displayName = string.IsNullOrWhiteSpace(request.DisplayName) ? plan.SuggestedName : request.DisplayName.Trim();
         var folderName = FolderNameSanitizer.Sanitize(displayName);
 
-        // ---- conflicts -------------------------------------------------------------------------------------------
-        var replacedDisplayName = (string?)null;
-        var replacedWasDisabled = false;
+        // ---- conflicts: decide now, delete later (only after the new folder is fully built) -----------------------
         var existing = _mods.Mods.FirstOrDefault(m => string.Equals(m.Entry.FolderName, folderName, StringComparison.OrdinalIgnoreCase));
         var enabledPath = Path.Combine(installation.ModsDirectory, folderName);
         var disabledPath = Path.Combine(installation.DisabledModsDirectory, folderName);
         var folderExists = Directory.Exists(enabledPath) || Directory.Exists(disabledPath);
+        var replace = false;
 
         if (existing is not null || folderExists)
         {
@@ -146,35 +154,60 @@ public sealed class ModInstaller : IModInstaller
                         || Directory.Exists(Path.Combine(installation.ModsDirectory, candidate))
                         || Directory.Exists(Path.Combine(installation.DisabledModsDirectory, candidate)));
                     enabledPath = Path.Combine(installation.ModsDirectory, folderName);
+                    disabledPath = Path.Combine(installation.DisabledModsDirectory, folderName);
+                    existing = null;
                     break;
 
                 case ConflictResolution.Replace:
-                    if (existing is not null)
-                    {
-                        replacedDisplayName = existing.Entry.DisplayName;
-                        replacedWasDisabled = existing.State == ModState.Disabled;
-                        progress?.Report(new InstallProgress($"Removing the previous version of {existing.Entry.DisplayName}..."));
-                        await _mods.UninstallAsync(existing.Entry.Id, cancellationToken).ConfigureAwait(false);
-                    }
-
-                    await Task.Run(() =>
-                    {
-                        DeleteModFolder(installation, Path.Combine(installation.ModsDirectory, folderName));
-                        DeleteModFolder(installation, Path.Combine(installation.DisabledModsDirectory, folderName));
-                    }, cancellationToken).ConfigureAwait(false);
+                    replace = true;
                     break;
             }
         }
 
-        // ---- build the folder next to its final location (same volume), then move it into ~mods -----------------
+        // ---- build the folder next to its final location (same volume), then swap it into ~mods ------------------
         var copyPlan = BuildCopyPlan(plan, selected);
         EnsureDirectory(installation.DisabledModsDirectory);
         EnsureDirectory(installation.ModsDirectory);
         var buildDir = Path.Combine(installation.DisabledModsDirectory, BuildPrefix + Guid.NewGuid().ToString("N")[..8]);
 
+        var now = DateTimeOffset.UtcNow;
+        ModEntry entry;
         try
         {
             await Task.Run(() => CopyFiles(plan.StagingRoot, buildDir, copyPlan, progress, cancellationToken), cancellationToken).ConfigureAwait(false);
+
+            // Hash before the move (same relative paths) so a cancelled hash can never strand an unrecorded folder in ~mods.
+            progress?.Report(new InstallProgress("Checking files..."));
+            entry = new ModEntry
+            {
+                FolderName = folderName,
+                DisplayName = displayName,
+                Source = ModSource.Local,
+                Version = plan.SuggestedVersion,
+                InstalledAt = now,
+                UpdatedAt = now,
+                Files = await FileHasher.HashDirectoryAsync(buildDir, cancellationToken).ConfigureAwait(false),
+            };
+
+            // The new folder is complete: only now remove what it replaces. From here on, cancellation is ignored
+            // so the swap cannot stop half-way.
+            var replacedWasDisabled = false;
+            if (replace)
+            {
+                if (existing is not null)
+                {
+                    entry.DisplayName = existing.Entry.DisplayName;
+                    replacedWasDisabled = existing.State == ModState.Disabled;
+                    progress?.Report(new InstallProgress($"Removing the previous version of {existing.Entry.DisplayName}..."));
+                    await _mods.UninstallAsync(existing.Entry.Id, CancellationToken.None).ConfigureAwait(false);
+                }
+
+                await Task.Run(() =>
+                {
+                    DeleteModFolder(installation, enabledPath);
+                    DeleteModFolder(installation, disabledPath);
+                }, CancellationToken.None).ConfigureAwait(false);
+            }
 
             progress?.Report(new InstallProgress($"Installing {displayName}..."));
             try
@@ -194,48 +227,36 @@ public sealed class ModInstaller : IModInstaller
             {
                 throw new ModOperationException($"The mod folder '{folderName}' could not be created in {installation.ModsDirectory}.");
             }
+
+            // ---- record ------------------------------------------------------------------------------------------
+            progress?.Report(new InstallProgress("Recording the mod..."));
+            try
+            {
+                await _mods.AddInstalledAsync(entry, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Never leave an unrecorded folder behind as if it were the user's own.
+                TryDelete(enabledPath);
+                throw;
+            }
+
+            if (replacedWasDisabled)
+            {
+                try
+                {
+                    await _mods.SetEnabledAsync(entry.Id, false, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "The replaced mod '{Mod}' was disabled before; the new version is enabled", entry.DisplayName);
+                }
+            }
         }
         catch
         {
             TryDelete(buildDir);
             throw;
-        }
-
-        // ---- record ----------------------------------------------------------------------------------------------
-        progress?.Report(new InstallProgress("Recording the mod..."));
-        var now = DateTimeOffset.UtcNow;
-        var entry = new ModEntry
-        {
-            FolderName = folderName,
-            DisplayName = replacedDisplayName ?? displayName,
-            Source = ModSource.Local,
-            Version = plan.SuggestedVersion,
-            InstalledAt = now,
-            UpdatedAt = now,
-            Files = await FileHasher.HashDirectoryAsync(enabledPath, cancellationToken).ConfigureAwait(false),
-        };
-
-        try
-        {
-            await _mods.AddInstalledAsync(entry, cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            // Never leave an unrecorded folder behind as if it were the user's own.
-            TryDelete(enabledPath);
-            throw;
-        }
-
-        if (replacedWasDisabled)
-        {
-            try
-            {
-                await _mods.SetEnabledAsync(entry.Id, false, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "The replaced mod '{Mod}' was disabled before; the new version is enabled", entry.DisplayName);
-            }
         }
 
         _logger.LogInformation(
@@ -267,7 +288,17 @@ public sealed class ModInstaller : IModInstaller
 
         if (!plan.PreserveStructure)
         {
-            // Only pak sets (and maybe readmes): everything goes directly into the mod folder.
+            // Only pak sets (and maybe readmes): everything goes directly into the mod folder. Two selected sets
+            // with the same file names would overwrite each other, so that combination is refused.
+            var clash = selected
+                .GroupBy(set => set.BaseName, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault(group => group.Count() > 1);
+            if (clash is not null)
+            {
+                throw new InstallPackageException(
+                    $"Two of the selected options contain the same files ('{clash.Key}'). Pick one of them, or install them one at a time.");
+            }
+
             foreach (var file in selected.SelectMany(set => set.Files))
             {
                 Add(file, Path.GetFileName(file));
@@ -421,12 +452,35 @@ public sealed class ModInstaller : IModInstaller
 
         try
         {
-            Directory.Delete(full, recursive: true);
+            try
+            {
+                Directory.Delete(full, recursive: true);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Files extracted from archives are often read-only; clear that and try once more.
+                ModService.ClearReadOnlyAttributes(full);
+                Directory.Delete(full, recursive: true);
+            }
         }
         catch (UnauthorizedAccessException ex)
         {
             throw new ModAccessDeniedException(full, ex);
         }
+
+        if (Directory.Exists(full))
+        {
+            throw new ModOperationException($"The folder '{full}' could not be deleted completely. Close any program using its files and try again.");
+        }
+    }
+
+    /// <summary>True when <paramref name="path"/> equals <paramref name="root"/> or lies beneath it.</summary>
+    private static bool IsSameOrUnder(string path, string root)
+    {
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        var normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        return string.Equals(normalizedPath, normalizedRoot, StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void EnsureDirectory(string path)

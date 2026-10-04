@@ -74,11 +74,33 @@ public sealed class InstallCoordinator : IInstallCoordinator
         return false;
     }
 
+    /// <summary>1 while an install flow (with its dialogs) is running; a second drop meanwhile is refused instead of interleaved.</summary>
+    private int _active;
+
     public async Task<IReadOnlyList<ModEntry>> InstallFromPathsAsync(IEnumerable<string> paths)
     {
         ArgumentNullException.ThrowIfNull(paths);
         var installed = new List<ModEntry>();
 
+        if (Interlocked.CompareExchange(ref _active, 1, 0) != 0)
+        {
+            _logger.LogInformation("Install request ignored: another install is in progress");
+            await _dialogs.ShowInfoAsync("Install in progress", "Finish the current install first, then drop the next package.");
+            return installed;
+        }
+
+        try
+        {
+            return await InstallFromPathsCoreAsync(paths, installed);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _active, 0);
+        }
+    }
+
+    private async Task<IReadOnlyList<ModEntry>> InstallFromPathsCoreAsync(IEnumerable<string> paths, List<ModEntry> installed)
+    {
         if (_game.Current is null)
         {
             await _dialogs.ShowErrorAsync("Game folder not set", $"Choose your {AppInfo.GameDisplayName} folder in Settings before installing mods.");
@@ -209,6 +231,12 @@ public sealed class InstallCoordinator : IInstallCoordinator
 
         while (true)
         {
+            // The game may have started while a conflict or permission dialog was open.
+            if (!await EnsureGameNotRunningAsync())
+            {
+                return null;
+            }
+
             var request = new InstallRequest(plan, selected, name, resolution);
             try
             {

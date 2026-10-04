@@ -30,7 +30,7 @@ public static class ModPackageInspector
         "__MACOSX",
     };
 
-    public static PackageContents Inspect(string stagingRoot)
+    public static PackageContents Inspect(string stagingRoot, CancellationToken cancellationToken = default)
     {
         var root = StripWrappers(Path.GetFullPath(stagingRoot));
         var warnings = new List<string>();
@@ -39,7 +39,7 @@ public static class ModPackageInspector
         var builders = new Dictionary<(string Dir, string Base), SetBuilder>();
         var order = new List<(string Dir, string Base)>();
 
-        foreach (var file in EnumerateFiles(root))
+        foreach (var file in EnumerateFiles(root, cancellationToken))
         {
             var relative = ToRelative(root, file);
             var name = Path.GetFileName(relative);
@@ -150,12 +150,13 @@ public static class ModPackageInspector
         return slash < 0 ? string.Empty : relativePath[..slash];
     }
 
-    private static IEnumerable<string> EnumerateFiles(string root)
+    private static IEnumerable<string> EnumerateFiles(string root, CancellationToken cancellationToken)
     {
         var pending = new Stack<string>();
         pending.Push(root);
         while (pending.Count > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var directory = pending.Pop();
             IEnumerable<string> files;
             IEnumerable<string> subDirectories;
