@@ -11,8 +11,8 @@ public static partial class ModNameHeuristics
     [GeneratedRegex(@"^(?<name>.+?)-(?<id>\d+)-(?<ver>\d+(?:-\d+)*)-(?<ts>\d{9,})$")]
     private static partial Regex NexusPattern();
 
-    /// <summary>Trailing versions such as " v1.2", "_1.0.3", "-2.0".</summary>
-    [GeneratedRegex(@"[\s_\-]+v?(?<ver>\d+(?:\.\d+)+)$", RegexOptions.IgnoreCase)]
+    /// <summary>Trailing versions such as " v1.2", " v2", "_1.0.3", "-2.0" (a bare number counts only with a 'v' prefix or a dot).</summary>
+    [GeneratedRegex(@"[\s_\-]+(?:v(?<ver>\d+(?:\.\d+)*)|(?<ver>\d+(?:\.\d+)+))$", RegexOptions.IgnoreCase)]
     private static partial Regex TrailingVersionPattern();
 
     [GeneratedRegex(@"\s+")]
