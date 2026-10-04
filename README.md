@@ -46,6 +46,22 @@ installer/
 - Disabled mods: `<GameRoot>\Dungeons\DungeonsModLoader_Disabled\<ModFolder>\` (same drive, outside `Paks`, so the game ignores them)
 - App data: `%LOCALAPPDATA%\DungeonsModLoader\` (`settings.json`, `manifest.json`, `profiles\`, `cache\`, `downloads\`, `logs\`, `backups\`)
 
+## Installing mods from files
+
+Drop a `.zip`, `.7z` or `.rar` archive (or loose `.pak`/`.ucas`/`.utoc` files, or a folder) onto the window, or use
+**Install from file...** on the Installed page.
+
+- The package is extracted to a temporary folder and scanned for mod file sets (`.pak` + `.ucas` + `.utoc` sharing a
+  base name; a lone `.pak` is also accepted). Single-folder wrappers such as `Dungeons\Content\Paks\~mods\Name\` are
+  stripped automatically.
+- When a package offers several file sets or variant folders (`Option A\`, `Option B\`), a picker lets you choose.
+- A package that contains only pak sets (plus readme files) is **flattened** into `~mods\<Name>\`. A package that also
+  ships data files (textures, configs, `skins\` folders ...) keeps its folder layout, because such mods read those
+  folders at runtime.
+- If the target folder already exists you are asked whether to replace it (a managed mod keeps its name and
+  enabled state) or to install next to it as `<Name> (2)`.
+- Nothing is written outside `~mods` and the disabled folder; the new mod starts enabled.
+
 ## Milestones
 
 1. Solution skeleton, DI, logging, theme tokens + swatch window, custom window chrome, sidebar navigation
