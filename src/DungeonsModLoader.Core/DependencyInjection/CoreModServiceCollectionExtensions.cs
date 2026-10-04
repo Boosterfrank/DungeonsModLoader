@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using DungeonsModLoader.Core.Install;
 using DungeonsModLoader.Core.Mods;
 using DungeonsModLoader.Core.Permissions;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +16,7 @@ public static class CoreModServiceCollectionExtensions
         services.AddSingleton<IManifestStore, JsonManifestStore>();
         services.AddSingleton<IModService, ModService>();
         services.AddSingleton<IPermissionFixer, PermissionFixer>();
+        services.AddSingleton<IModInstaller, ModInstaller>();
         return services;
     }
 }

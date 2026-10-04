@@ -56,6 +56,12 @@ public interface IModService
     /// </summary>
     Task<ModEntry> ImportUnmanagedAsync(string folderName, string? displayName = null, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Records a mod whose folder the install pipeline has just placed inside <c>~mods</c>. The entry's
+    /// <see cref="ModEntry.FolderName"/> must exist there and must not be used by another entry.
+    /// </summary>
+    Task AddInstalledAsync(ModEntry entry, CancellationToken cancellationToken = default);
+
     Task RenameAsync(Guid modId, string displayName, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes the mod folder (wherever it currently is) and removes the manifest entry. For a missing mod only the entry is removed.</summary>

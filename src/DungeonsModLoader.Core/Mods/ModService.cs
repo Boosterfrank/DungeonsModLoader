@@ -319,6 +319,47 @@ public sealed class ModService : IModService, IDisposable
         }
     }
 
+    public async Task AddInstalledAsync(ModEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (!IsPlainFolderName(entry.FolderName))
+        {
+            throw new ArgumentException($"'{entry.FolderName}' is not a valid folder name.", nameof(entry));
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var installation = RequireInstallation();
+            if (!Directory.Exists(Path.Combine(installation.ModsDirectory, entry.FolderName)))
+            {
+                throw new ModNotFoundException($"There is no folder named '{entry.FolderName}' in {installation.ModsDirectory}.");
+            }
+
+            var clash = _manifest.Mods.FirstOrDefault(m =>
+                m.Id == entry.Id || string.Equals(m.FolderName, entry.FolderName, StringComparison.OrdinalIgnoreCase));
+            if (clash is not null)
+            {
+                throw new InvalidOperationException($"The folder '{entry.FolderName}' is already managed as '{clash.DisplayName}'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.DisplayName))
+            {
+                entry.DisplayName = entry.FolderName;
+            }
+
+            _manifest.Mods.Add(entry);
+            await SaveManifestOrRevertAsync(() => _manifest.Mods.Remove(entry), installation, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Recorded installed mod '{Mod}' ({Folder}, {Files} files)", entry.DisplayName, entry.FolderName, entry.Files.Count);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        RaiseChanged();
+    }
+
     public async Task RenameAsync(Guid modId, string displayName, CancellationToken cancellationToken = default)
     {
         var trimmed = displayName?.Trim() ?? string.Empty;
@@ -513,7 +554,33 @@ public sealed class ModService : IModService, IDisposable
     {
         EnsureDirectory(installation.ModsDirectory);
         EnsureDirectory(installation.DisabledModsDirectory);
+        CleanupInternalFolders(installation);
         RefreshSnapshotCore(installation);
+    }
+
+    /// <summary>Prefix of the app's own temporary folders (install staging); never shown as mods, deleted when stale.</summary>
+    public const string InternalFolderPrefix = ".dml-";
+
+    private static bool IsInternalFolder(string name) => name.StartsWith(InternalFolderPrefix, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Removes build folders a crashed install left behind in either mod folder.</summary>
+    private void CleanupInternalFolders(GameInstallation installation)
+    {
+        foreach (var parent in new[] { installation.ModsDirectory, installation.DisabledModsDirectory })
+        {
+            try
+            {
+                foreach (var directory in Directory.EnumerateDirectories(parent, InternalFolderPrefix + "*"))
+                {
+                    _logger.LogInformation("Removing leftover install folder {Path}", directory);
+                    Directory.Delete(directory, recursive: true);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogDebug(ex, "Leftover install folders under {Parent} could not be cleaned", parent);
+            }
+        }
     }
 
     /// <summary>Recomputes <see cref="Mods"/> and <see cref="UnmanagedFolders"/> from the manifest and the disk. Runs under the gate.</summary>
@@ -533,7 +600,7 @@ public sealed class ModService : IModService, IDisposable
             {
                 unmanaged = Directory.EnumerateDirectories(installation.ModsDirectory)
                     .Select(Path.GetFileName)
-                    .Where(name => !string.IsNullOrEmpty(name) && !managed.Contains(name))
+                    .Where(name => !string.IsNullOrEmpty(name) && !managed.Contains(name) && !IsInternalFolder(name))
                     .Select(name => name!)
                     .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                     .ToImmutableArray();
