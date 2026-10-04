@@ -1,0 +1,63 @@
+<Window x:Class="DungeonsModLoader.App.Views.Dialogs.ProgressDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Working"
+        Width="460" SizeToContent="Height"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="False"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource Brush.Bg.Panel}"
+        Foreground="{StaticResource Brush.Text.Primary}"
+        FontFamily="{StaticResource Font.Body}"
+        FontSize="{StaticResource FontSize.Body}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Loaded="OnLoaded"
+        Closing="OnClosing">
+
+  <!--
+    Progress of a long operation (extracting, copying). Same anatomy as MessageDialog: borderless, draggable
+    header, body, footer, extruded bottom edge. It cannot be closed by the user except through Cancel (when the
+    operation supports it); the dialog service closes it when the work completes.
+  -->
+  <WindowChrome.WindowChrome>
+    <WindowChrome CaptionHeight="0" CornerRadius="0" GlassFrameThickness="0,0,0,1"
+                  ResizeBorderThickness="0" UseAeroCaptionButtons="False" />
+  </WindowChrome.WindowChrome>
+
+  <Border Background="{StaticResource Brush.Bg.Panel}"
+          BorderBrush="{StaticResource Brush.Border.Strong}"
+          BorderThickness="{StaticResource Thickness.Border.Thin}">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <!-- Header: draggable. -->
+      <Border Grid.Row="0" Background="Transparent" Padding="24,20,24,0"
+              MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+        <TextBlock x:Name="TitleText" Style="{StaticResource Text.H2}" TextWrapping="Wrap" TextTrimming="None" />
+      </Border>
+
+      <!-- Body: the current step and the bar. -->
+      <StackPanel Grid.Row="1" Margin="24,12,24,24">
+        <TextBlock x:Name="MessageText" Style="{StaticResource Text.Body}"
+                   Foreground="{StaticResource Brush.Text.Secondary}"
+                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                   Text="Please wait..." />
+        <ProgressBar x:Name="Bar" IsIndeterminate="True" Minimum="0" Maximum="100" Margin="0,14,0,0" />
+      </StackPanel>
+
+      <!-- Footer: Cancel only (hidden when the operation cannot be cancelled). -->
+      <Border x:Name="Footer" Grid.Row="2" Background="{StaticResource Brush.Bg.PanelAlt}"
+              BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="24,16">
+        <Button x:Name="CancelButton" Content="Cancel" HorizontalAlignment="Right"
+                Style="{DynamicResource Button.Secondary}" MinWidth="100"
+                Click="OnCancelClick" />
+      </Border>
+
+      <Border Grid.Row="3" Height="{StaticResource Size.Extrude}" Background="{StaticResource Brush.Bevel.Dark}" />
+    </Grid>
+  </Border>
+</Window>

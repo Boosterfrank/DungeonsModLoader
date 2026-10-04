@@ -12,8 +12,9 @@ using Microsoft.Extensions.Logging;
 namespace DungeonsModLoader.App.ViewModels;
 
 /// <summary>
-/// Shell view model: owns the four pages, the current selection, the Play action and the game-running state.
-/// It starts the process monitor for the configured installation and restarts it whenever the installation changes.
+/// Shell view model: owns the four pages, the current selection, the Play action, the game-running state and the
+/// drag & drop install entry point. It starts the process monitor for the configured installation and restarts it
+/// whenever the installation changes.
 /// </summary>
 public sealed partial class MainViewModel : ObservableObject
 {
@@ -25,6 +26,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IGameProcessMonitor _monitor;
     private readonly IModService _mods;
     private readonly IModStoreInitializer _initializer;
+    private readonly IInstallCoordinator _installs;
     private readonly IDialogService _dialogs;
     private readonly ILogger<MainViewModel> _logger;
 
@@ -41,6 +43,7 @@ public sealed partial class MainViewModel : ObservableObject
         IGameProcessMonitor monitor,
         IModService mods,
         IModStoreInitializer initializer,
+        IInstallCoordinator installs,
         IDialogService dialogs,
         ILogger<MainViewModel> logger)
     {
@@ -53,6 +56,7 @@ public sealed partial class MainViewModel : ObservableObject
         _monitor = monitor;
         _mods = mods;
         _initializer = initializer;
+        _installs = installs;
         _dialogs = dialogs;
         _logger = logger;
 
@@ -62,6 +66,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         _game.Changed += OnGameChanged;
         _monitor.GameRunningChanged += OnGameRunningChanged;
+        _installs.Installed += OnModInstalled;
         ApplyGameContext();
     }
 
@@ -93,6 +98,36 @@ public sealed partial class MainViewModel : ObservableObject
         if (page is not null)
         {
             CurrentPage = page;
+        }
+    }
+
+    /// <summary>
+    /// Installs the files dropped on the window (archives, loose mod files, folders). The coordinator shows every
+    /// dialog and reports each installed mod through its event, which puts "Installed ..." in the title bar.
+    /// </summary>
+    public async Task InstallFilesAsync(IEnumerable<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        var list = paths.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+        if (list.Count == 0)
+        {
+            return;
+        }
+
+        _logger.LogInformation("{Count} path(s) dropped on the window", list.Count);
+        try
+        {
+            var installed = await _installs.InstallFromPathsAsync(list);
+            if (installed.Count > 1)
+            {
+                SetStatus($"Installed {installed.Count} mods", autoClear: true);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The coordinator handles every expected failure itself; this is the last line of defence.
+            _logger.LogError(ex, "Drop install failed unexpectedly");
+            await _dialogs.ShowErrorAsync("Could not install", "Something went wrong while installing. See the log for details.", ex.ToString());
         }
     }
 
@@ -204,6 +239,8 @@ public sealed partial class MainViewModel : ObservableObject
     private void OnGameChanged(object? sender, EventArgs e) => OnUiThread(ApplyGameContext);
 
     private void OnGameRunningChanged(object? sender, bool running) => OnUiThread(() => IsGameRunning = running);
+
+    private void OnModInstalled(object? sender, ModEntry entry) => OnUiThread(() => SetStatus($"Installed {entry.DisplayName}", autoClear: true));
 
     private void ApplyGameContext()
     {

@@ -1,0 +1,143 @@
+<Window x:Class="DungeonsModLoader.App.Views.Dialogs.InstallPickerDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:DungeonsModLoader.App.Controls"
+        xmlns:dialogs="clr-namespace:DungeonsModLoader.App.ViewModels.Dialogs"
+        Title="Install"
+        Width="560" SizeToContent="Height"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="False"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource Brush.Bg.Panel}"
+        Foreground="{StaticResource Brush.Text.Primary}"
+        FontFamily="{StaticResource Font.Body}"
+        FontSize="{StaticResource FontSize.Body}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Loaded="OnLoaded">
+
+  <!--
+    Install picker: shown when a package offers a choice (several file sets, or sets in several folders).
+    DataContext: InstallPickerViewModel. Same anatomy as MessageDialog; the list scrolls once the window reaches
+    70% of the screen height (MaxHeight is set in code-behind).
+  -->
+  <WindowChrome.WindowChrome>
+    <WindowChrome CaptionHeight="0" CornerRadius="0" GlassFrameThickness="0,0,0,1"
+                  ResizeBorderThickness="0" UseAeroCaptionButtons="False" />
+  </WindowChrome.WindowChrome>
+
+  <Window.Resources>
+    <!-- One folder of the package: label + its file sets. -->
+    <DataTemplate DataType="{x:Type dialogs:InstallPickerGroupViewModel}">
+      <StackPanel Margin="0,0,0,10">
+        <TextBlock Style="{StaticResource Text.Label}" Text="{Binding Name}" Margin="0,0,0,10" />
+        <ItemsControl ItemsSource="{Binding Items}" Focusable="False" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- One file set: check box with "Name  folder/Name_P"; incomplete sets are disabled with their warning beneath. -->
+    <DataTemplate DataType="{x:Type dialogs:InstallPickerItemViewModel}">
+      <StackPanel Margin="0,0,0,10">
+        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                  IsEnabled="{Binding IsValid}"
+                  Padding="12,0,0,0"
+                  HorizontalAlignment="Stretch"
+                  AutomationProperties.Name="{Binding DisplayPath}">
+          <TextBlock Style="{StaticResource Text.Body}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                     ToolTip="{Binding DisplayPath}">
+            <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="   " /><Run Text="{Binding DisplayPath, Mode=OneWay}" FontSize="{StaticResource FontSize.Small}" Foreground="{StaticResource Brush.Text.Muted}" />
+          </TextBlock>
+        </CheckBox>
+        <TextBlock Style="{StaticResource Text.Small}"
+                   Foreground="{StaticResource Brush.Warning}"
+                   Text="{Binding Warning}"
+                   TextWrapping="Wrap"
+                   Margin="30,4,0,0"
+                   Visibility="{Binding Warning, Converter={StaticResource Converter.NullToVisibility}}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- Package-level warning with a small "!" marker. -->
+    <DataTemplate x:Key="InstallPicker.WarningTemplate">
+      <Grid Margin="0,0,0,6">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Border Grid.Column="0" Width="16" Height="16" VerticalAlignment="Top" Margin="0,0,8,0"
+                Background="{StaticResource Brush.Warning.Faint}"
+                BorderBrush="{StaticResource Brush.Warning}"
+                BorderThickness="{StaticResource Thickness.Border.Thin}"
+                CornerRadius="{StaticResource Radius.Small}">
+          <TextBlock Text="!" FontFamily="{StaticResource Font.Display}" FontWeight="Bold"
+                     FontSize="{StaticResource FontSize.Small}" Foreground="{StaticResource Brush.Warning}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0" />
+        </Border>
+        <TextBlock Grid.Column="1" Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Warning}"
+                   Text="{Binding}" TextWrapping="Wrap" />
+      </Grid>
+    </DataTemplate>
+  </Window.Resources>
+
+  <Border Background="{StaticResource Brush.Bg.Panel}"
+          BorderBrush="{StaticResource Brush.Border.Strong}"
+          BorderThickness="{StaticResource Thickness.Border.Thin}">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <!-- Header: draggable. -->
+      <Border Grid.Row="0" Background="Transparent" Padding="24,20,24,0"
+              MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Text.H2}" Text="{Binding Header}" TextWrapping="Wrap" TextTrimming="None" />
+          <TextBlock Style="{StaticResource Text.Body}" Foreground="{StaticResource Brush.Text.Secondary}"
+                     Text="Choose what to install." Margin="0,4,0,0" />
+        </StackPanel>
+      </Border>
+
+      <!-- Mod name -->
+      <TextBox Grid.Row="1" Margin="24,16,24,0"
+               x:Name="NameBox"
+               controls:TextBoxHelper.Placeholder="Mod name"
+               Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+               AutomationProperties.Name="Mod name" />
+
+      <!-- File sets, grouped by folder; scrolls when the window hits its maximum height. -->
+      <ScrollViewer Grid.Row="2" Margin="24,16,24,14" VerticalScrollBarVisibility="Auto" Padding="0,0,4,0">
+        <StackPanel>
+          <ItemsControl ItemsSource="{Binding Groups}" Focusable="False" />
+
+          <TextBlock Style="{StaticResource Text.Small}"
+                     Text="This package contains data files, so its folder layout will be kept."
+                     TextWrapping="Wrap" Margin="0,4,0,6"
+                     Visibility="{Binding PreserveStructure, Converter={StaticResource Converter.BoolToVisibility}}" />
+
+          <ItemsControl ItemsSource="{Binding Warnings}"
+                        ItemTemplate="{StaticResource InstallPicker.WarningTemplate}"
+                        Focusable="False" Margin="0,6,0,0"
+                        Visibility="{Binding HasWarnings, Converter={StaticResource Converter.BoolToVisibility}}" />
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- Footer -->
+      <Border Grid.Row="3" Background="{StaticResource Brush.Bg.PanelAlt}"
+              BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="24,16">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+          <Button Content="Cancel" IsCancel="True"
+                  Style="{DynamicResource Button.Secondary}" MinWidth="100" Margin="0,0,8,0"
+                  Click="OnCancelClick" />
+          <Button x:Name="InstallButton" Content="Install" IsDefault="True"
+                  Style="{DynamicResource Button.Primary}" MinWidth="100"
+                  IsEnabled="{Binding CanInstall}"
+                  Click="OnInstallClick" />
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Row="4" Height="{StaticResource Size.Extrude}" Background="{StaticResource Brush.Bevel.Dark}" />
+    </Grid>
+  </Border>
+</Window>

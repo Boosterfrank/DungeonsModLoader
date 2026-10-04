@@ -193,11 +193,12 @@
     </StackPanel>
 
     <!-- ============================ Toolbar ============================ -->
-    <!-- Search | filter chips (wrap when the window is narrow). Bulk actions live in the footer. -->
+    <!-- Search | filter chips (wrap when the window is narrow) | Install from file. Bulk actions live in the footer. -->
     <Grid Grid.Row="1" Margin="0,20,0,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
 
       <TextBox Grid.Column="0"
@@ -218,6 +219,15 @@
         <RadioButton Style="{StaticResource Installed.Chip}" GroupName="InstalledFilter" Content="Updates available"
                      IsChecked="{Binding IsUpdatesFilter, Mode=TwoWay}" />
       </WrapPanel>
+
+      <!-- Centred on the 36px search box (28px button, 4px offset). -->
+      <Button Grid.Column="2"
+              Style="{StaticResource Installed.SmallButton}"
+              Content="Install from file..."
+              VerticalAlignment="Top"
+              Margin="16,4,0,0"
+              Command="{Binding InstallFromFileCommand}"
+              ToolTip="Install a mod from a .zip, .7z or .rar archive, or from .pak/.ucas/.utoc files" />
     </Grid>
 
     <!-- ============================ Game-running banner ============================ -->
@@ -275,16 +285,25 @@
         <Button Style="{DynamicResource Button.Secondary}" Content="Try again" HorizontalAlignment="Center" Command="{Binding RetryInitializeCommand}" />
       </StackPanel>
 
-      <!-- Nothing installed at all. -->
+      <!-- Nothing installed at all: drop hint + the two ways to get a mod in. -->
       <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420"
                   Visibility="{Binding ShowEmptyState, Converter={StaticResource Converter.BoolToVisibility}}">
         <Path Style="{StaticResource EmptyState.Icon}" Data="{StaticResource Icon.Installed}" />
-        <TextBlock Style="{StaticResource EmptyState.Headline}" Text="No mods installed yet" />
-        <Button Style="{DynamicResource Button.Secondary}"
-                Content="Browse Nexus Mods"
-                HorizontalAlignment="Center"
-                Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                CommandParameter="{Binding DataContext.Browse, RelativeSource={RelativeSource AncestorType=Window}}" />
+        <TextBlock Style="{StaticResource EmptyState.Headline}" Text="No mods installed yet" Margin="0,0,0,8" />
+        <TextBlock Style="{StaticResource Text.Secondary}"
+                   Text="Drop a .zip, .7z or .rar here, or pick a file to install."
+                   TextAlignment="Center" TextWrapping="Wrap"
+                   Margin="0,0,0,24" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+          <Button Style="{DynamicResource Button.Secondary}"
+                  Content="Install from file..."
+                  Margin="0,0,12,0"
+                  Command="{Binding InstallFromFileCommand}" />
+          <Button Style="{DynamicResource Button.Secondary}"
+                  Content="Browse Nexus Mods"
+                  Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                  CommandParameter="{Binding DataContext.Browse, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </StackPanel>
       </StackPanel>
     </Grid>
 

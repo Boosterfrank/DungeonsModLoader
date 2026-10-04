@@ -70,7 +70,15 @@
     <KeyBinding Modifiers="Ctrl" Key="D4" Command="{Binding NavigateCommand}" CommandParameter="{Binding Settings}" />
   </Window.InputBindings>
 
-  <Grid>
+  <!--
+    Drag & drop install: the root grid is the drop target. The tunnelling (Preview*) events are used so the feedback
+    is consistent even over controls that handle drag events themselves (the search TextBox); see code-behind.
+  -->
+  <Grid AllowDrop="True"
+        PreviewDragEnter="OnPreviewDragEnter"
+        PreviewDragOver="OnPreviewDragOver"
+        PreviewDragLeave="OnPreviewDragLeave"
+        PreviewDrop="OnPreviewDrop">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
@@ -229,5 +237,39 @@
     <!-- ============================ Content ============================ -->
     <shell:TransitioningContentControl Grid.Row="1" Grid.Column="1"
                                        Content="{Binding CurrentPage}" />
+
+    <!-- ============================ Drop overlay ============================ -->
+    <!-- Shown while acceptable files are dragged over the window; not hit-test visible so the grid stays the drop target. -->
+    <Border x:Name="DropOverlay"
+            Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+            Background="{StaticResource Brush.Bg.Overlay}"
+            Visibility="Collapsed"
+            IsHitTestVisible="False">
+      <Grid Width="440" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Rectangle Fill="{StaticResource Brush.Bg.Panel}"
+                   Stroke="{StaticResource Brush.Accent}"
+                   StrokeThickness="2"
+                   StrokeDashArray="4 3"
+                   RadiusX="4" RadiusY="4"
+                   SnapsToDevicePixels="True" />
+        <StackPanel Margin="32,36">
+          <Path Data="{StaticResource Icon.Drop}"
+                Width="32" Height="32"
+                Stretch="Uniform"
+                Fill="{StaticResource Brush.Accent.Light}"
+                HorizontalAlignment="Center"
+                SnapsToDevicePixels="True" />
+          <TextBlock Style="{StaticResource Text.H2}"
+                     Text="Drop to install"
+                     HorizontalAlignment="Center"
+                     Margin="0,16,0,6" />
+          <TextBlock Style="{StaticResource Text.Secondary}"
+                     Text="Archives (.zip, .7z, .rar) or .pak/.ucas/.utoc files"
+                     HorizontalAlignment="Center"
+                     TextAlignment="Center"
+                     TextWrapping="Wrap" />
+        </StackPanel>
+      </Grid>
+    </Border>
   </Grid>
 </Window>
