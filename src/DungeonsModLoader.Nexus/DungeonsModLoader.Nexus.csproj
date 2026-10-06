@@ -1,6 +1,6 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Nexus Mods API client, SSO, nxm:// link parsing, DTOs. No WPF references. -->
+  <!-- Nexus Mods API client (v1 REST + v2 GraphQL), SSO, DPAPI key store, nxm:// link parsing, downloads, update check. No WPF references. -->
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>DungeonsModLoader.Nexus</RootNamespace>
@@ -10,10 +10,16 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DungeonsModLoader.Core\DungeonsModLoader.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="DungeonsModLoader.Core.Tests" />
+  </ItemGroup>
+
 </Project>
+

@@ -79,6 +79,12 @@ public interface IModService
     Task AddInstalledAsync(ModEntry entry, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Replaces the manifest entry that has <paramref name="entry"/>'s id (an update that kept the folder): same id,
+    /// new files, version and source fields. Throws <see cref="ModNotFoundException"/> when the id is unknown.
+    /// </summary>
+    Task ReplaceInstalledAsync(ModEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Keeps automatic adoption away from <paramref name="folderName"/> until the returned handle is disposed, so
     /// an installer can place a folder in <c>~mods</c> and record it itself without a reconcile adopting it first.
     /// </summary>

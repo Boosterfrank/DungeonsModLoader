@@ -9,7 +9,12 @@ public sealed class ModInstaller : IModInstaller
 {
     private const string StagingPrefix = "install-";
     private const string BuildPrefix = ".dml-install-";
+    private const int E_ACCESSDENIED = unchecked((int)0x80070005);
+    private const int ERROR_NOT_SAME_DEVICE = unchecked((int)0x80070011);
     private static readonly TimeSpan StaleStagingAge = TimeSpan.FromDays(1);
+
+    /// <summary>Backups kept per mod folder under <c>backups\&lt;folder&gt;\</c> (spec: the last two).</summary>
+    public const int BackupsToKeep = 2;
 
     private readonly IGameContext _game;
     private readonly IModService _mods;
@@ -128,6 +133,13 @@ public sealed class ModInstaller : IModInstaller
             throw new InstallPackageException("Nothing to install: select at least one complete mod file set.");
         }
 
+        if (request.UpdateOf is { } updateOf)
+        {
+            var target = _mods.Find(updateOf) ?? throw new ModNotFoundException($"The mod to update is no longer installed.");
+            return await UpdateAsync(request, installation, target, selected, progress, cancellationToken).ConfigureAwait(false);
+        }
+
+        var metadata = request.Metadata ?? ModMetadata.Local;
         var displayName = string.IsNullOrWhiteSpace(request.DisplayName) ? plan.SuggestedName : request.DisplayName.Trim();
         var folderName = FolderNameSanitizer.Sanitize(displayName);
 
@@ -182,8 +194,12 @@ public sealed class ModInstaller : IModInstaller
             {
                 FolderName = folderName,
                 DisplayName = displayName,
-                Source = ModSource.Local,
-                Version = plan.SuggestedVersion,
+                Source = metadata.Source,
+                NexusModId = metadata.NexusModId,
+                NexusFileId = metadata.NexusFileId,
+                Version = metadata.Version ?? plan.SuggestedVersion,
+                Author = metadata.Author,
+                ThumbnailUrl = metadata.ThumbnailUrl,
                 InstalledAt = now,
                 UpdatedAt = now,
                 Files = await FileHasher.HashDirectoryAsync(buildDir, cancellationToken).ConfigureAwait(false),
@@ -214,19 +230,7 @@ public sealed class ModInstaller : IModInstaller
             using var reservation = _mods.ReserveFolderName(folderName);
 
             progress?.Report(new InstallProgress($"Installing {displayName}..."));
-            try
-            {
-                Directory.Move(buildDir, enabledPath);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new ModAccessDeniedException(enabledPath, ex);
-            }
-            catch (IOException ex) when (ex.HResult == unchecked((int)0x80070005))
-            {
-                throw new ModAccessDeniedException(enabledPath, ex);
-            }
-
+            MoveIntoPlace(buildDir, enabledPath);
             if (!Directory.Exists(enabledPath))
             {
                 throw new ModOperationException($"The mod folder '{folderName}' could not be created in {installation.ModsDirectory}.");
@@ -264,12 +268,154 @@ public sealed class ModInstaller : IModInstaller
         }
 
         _logger.LogInformation(
-            "Installed '{Mod}' into {Folder}: {Files} files ({Mode})",
+            "Installed '{Mod}' into {Folder}: {Files} files ({Mode}, source {Source})",
             entry.DisplayName,
             enabledPath,
             entry.Files.Count,
-            plan.PreserveStructure ? "structure preserved" : "flattened");
+            plan.PreserveStructure ? "structure preserved" : "flattened",
+            entry.Source);
         return entry;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Update in place
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Replaces the folder of <paramref name="target"/> with the package: the new folder is built first, the old
+    /// one is moved to <c>backups\&lt;folder&gt;\&lt;timestamp&gt;_&lt;version&gt;</c>, the new one takes its place
+    /// (same location, so the enabled state is kept) and the manifest entry is updated with the same id (so
+    /// profiles and the display name are kept). Any failure after the backup restores the old folder.
+    /// </summary>
+    private async Task<ModEntry> UpdateAsync(InstallRequest request, GameInstallation installation, ModInfo target, IReadOnlyList<ModFileSet> selected, IProgress<InstallProgress>? progress, CancellationToken cancellationToken)
+    {
+        var plan = request.Plan;
+        var old = target.Entry;
+        var metadata = request.Metadata ?? new ModMetadata(old.Source, old.NexusModId, old.NexusFileId, plan.SuggestedVersion, old.Author, old.ThumbnailUrl);
+        var folderName = old.FolderName;
+        var currentPath = target.State switch
+        {
+            ModState.Enabled => Path.Combine(installation.ModsDirectory, folderName),
+            ModState.Disabled => Path.Combine(installation.DisabledModsDirectory, folderName),
+            _ => Path.Combine(installation.ModsDirectory, folderName), // missing: the update re-creates it, enabled
+        };
+
+        var copyPlan = BuildCopyPlan(plan, selected);
+        EnsureDirectory(installation.DisabledModsDirectory);
+        EnsureDirectory(installation.ModsDirectory);
+        var buildDir = Path.Combine(installation.DisabledModsDirectory, BuildPrefix + Guid.NewGuid().ToString("N")[..8]);
+
+        ModEntry entry;
+        try
+        {
+            await Task.Run(() => CopyFiles(plan.StagingRoot, buildDir, copyPlan, progress, cancellationToken), cancellationToken).ConfigureAwait(false);
+            progress?.Report(new InstallProgress("Checking files..."));
+            entry = new ModEntry
+            {
+                Id = old.Id,
+                FolderName = folderName,
+                DisplayName = old.DisplayName,
+                Source = metadata.Source,
+                NexusModId = metadata.NexusModId ?? old.NexusModId,
+                NexusFileId = metadata.NexusFileId ?? old.NexusFileId,
+                Version = metadata.Version ?? plan.SuggestedVersion ?? old.Version,
+                Author = metadata.Author ?? old.Author,
+                ThumbnailUrl = metadata.ThumbnailUrl ?? old.ThumbnailUrl,
+                InstalledAt = old.InstalledAt,
+                UpdatedAt = DateTimeOffset.UtcNow,
+                Files = await FileHasher.HashDirectoryAsync(buildDir, cancellationToken).ConfigureAwait(false),
+            };
+        }
+        catch
+        {
+            TryDelete(buildDir);
+            throw;
+        }
+
+        // From here on cancellation is ignored: the swap must either complete or be rolled back.
+        using var reservation = _mods.ReserveFolderName(folderName);
+        string? backupDir = null;
+        try
+        {
+            if (Directory.Exists(currentPath))
+            {
+                backupDir = BackupPath(folderName, old.Version);
+                progress?.Report(new InstallProgress($"Backing up the current version of {old.DisplayName}..."));
+                await Task.Run(() => MoveDirectory(currentPath, backupDir), CancellationToken.None).ConfigureAwait(false);
+                _logger.LogInformation("Backed up '{Mod}' ({Version}) to {Backup}", old.DisplayName, old.Version ?? "?", backupDir);
+            }
+
+            progress?.Report(new InstallProgress($"Installing the new version of {old.DisplayName}..."));
+            MoveIntoPlace(buildDir, currentPath);
+            if (!Directory.Exists(currentPath))
+            {
+                throw new ModOperationException($"The mod folder '{folderName}' could not be put in place.");
+            }
+
+            progress?.Report(new InstallProgress("Recording the update..."));
+            await _mods.ReplaceInstalledAsync(entry, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Update of '{Mod}' failed; restoring the previous version", old.DisplayName);
+            TryDelete(buildDir);
+            if (backupDir is not null)
+            {
+                TryDelete(currentPath);
+                try
+                {
+                    MoveDirectory(backupDir, currentPath);
+                }
+                catch (Exception restoreError) when (restoreError is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogError(restoreError, "The previous version of '{Mod}' could not be restored from {Backup}", old.DisplayName, backupDir);
+                    throw new ModOperationException(
+                        $"The update failed and the previous version could not be put back automatically. A copy of it is in {backupDir}.",
+                        ex);
+                }
+            }
+
+            throw;
+        }
+
+        PruneBackups(folderName);
+        _logger.LogInformation("Updated '{Mod}' in {Folder} to version {Version} ({Files} files)", entry.DisplayName, currentPath, entry.Version ?? "?", entry.Files.Count);
+        return entry;
+    }
+
+    private string BackupPath(string folderName, string? version)
+    {
+        var parent = Path.Combine(_paths.BackupsDirectory, folderName);
+        var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss");
+        var suffix = string.IsNullOrWhiteSpace(version) ? string.Empty : "_" + FolderNameSanitizer.Sanitize(version, "v");
+        return Path.Combine(parent, FolderNameSanitizer.MakeUnique(stamp + suffix, candidate => Directory.Exists(Path.Combine(parent, candidate))));
+    }
+
+    /// <summary>Keeps the newest <see cref="BackupsToKeep"/> backups of a mod folder.</summary>
+    private void PruneBackups(string folderName)
+    {
+        try
+        {
+            var parent = Path.Combine(_paths.BackupsDirectory, folderName);
+            if (!Directory.Exists(parent))
+            {
+                return;
+            }
+
+            var stale = Directory.GetDirectories(parent)
+                .OrderByDescending(d => Path.GetFileName(d), StringComparer.Ordinal)
+                .Skip(BackupsToKeep)
+                .ToList();
+            foreach (var directory in stale)
+            {
+                _logger.LogInformation("Removing old backup {Backup}", directory);
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Old backups of {Folder} could not be pruned", folderName);
+        }
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -438,6 +584,57 @@ public sealed class ModInstaller : IModInstaller
             File.SetAttributes(to, File.GetAttributes(to) & ~FileAttributes.ReadOnly);
             done++;
             progress?.Report(new InstallProgress($"Copying files ({done}/{copies.Count})", copies.Count == 0 ? null : done / (double)copies.Count));
+        }
+    }
+
+    /// <summary>Moves the finished build folder to its final place; access problems become <see cref="ModAccessDeniedException"/>.</summary>
+    private static void MoveIntoPlace(string buildDir, string destination)
+    {
+        try
+        {
+            Directory.Move(buildDir, destination);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new ModAccessDeniedException(destination, ex);
+        }
+        catch (IOException ex) when (ex.HResult == E_ACCESSDENIED)
+        {
+            throw new ModAccessDeniedException(destination, ex);
+        }
+    }
+
+    /// <summary>Directory.Move, falling back to copy + delete when source and target are on different volumes (backups folder).</summary>
+    internal static void MoveDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(destination))!);
+        try
+        {
+            Directory.Move(source, destination);
+            return;
+        }
+        catch (IOException ex) when (ex.HResult == ERROR_NOT_SAME_DEVICE || !string.Equals(Path.GetPathRoot(Path.GetFullPath(source)), Path.GetPathRoot(Path.GetFullPath(destination)), StringComparison.OrdinalIgnoreCase))
+        {
+            // Different drive: copy, verify, then remove the source.
+        }
+
+        CopyDirectory(source, destination);
+        Directory.Delete(source, recursive: true);
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            var target = Path.Combine(destination, Path.GetFileName(file));
+            File.Copy(file, target, overwrite: true);
+            File.SetAttributes(target, File.GetAttributes(target) & ~FileAttributes.ReadOnly);
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(source))
+        {
+            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
         }
     }
 

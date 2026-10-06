@@ -27,6 +27,15 @@ public sealed class AppPaths
     public string BackupsDirectory => Path.Combine(Root, "backups");
     public string TempDirectory => Path.Combine(Root, "temp");
 
+    /// <summary>The user's Nexus Mods API key, DPAPI-encrypted for the current Windows user (never plain text).</summary>
+    public string NexusApiKeyFile => Path.Combine(Root, "nexus-apikey.bin");
+
+    /// <summary>Cached Nexus API responses (JSON envelopes with an expiry).</summary>
+    public string NexusCacheDirectory => Path.Combine(CacheDirectory, "nexus");
+
+    /// <summary>Cached mod thumbnails.</summary>
+    public string ThumbnailCacheDirectory => Path.Combine(CacheDirectory, "thumbnails");
+
     /// <summary>Creates every directory this app writes to. Safe to call repeatedly.</summary>
     public void EnsureCreated()
     {

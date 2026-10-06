@@ -486,6 +486,37 @@ public sealed class ModService : IModService, IDisposable
         RaiseChanged();
     }
 
+    public async Task ReplaceInstalledAsync(ModEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var installation = RequireInstallation();
+            var index = _manifest.Mods.FindIndex(m => m.Id == entry.Id);
+            if (index < 0)
+            {
+                throw new ModNotFoundException($"No installed mod has the id {entry.Id}.");
+            }
+
+            var previous = _manifest.Mods[index];
+            if (!string.Equals(previous.FolderName, entry.FolderName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"An update must keep the folder name ('{previous.FolderName}' vs '{entry.FolderName}').");
+            }
+
+            _manifest.Mods[index] = entry;
+            await SaveManifestOrRevertAsync(() => _manifest.Mods[index] = previous, installation, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Updated manifest entry for '{Mod}' ({Folder}): version {Old} -> {New}, {Files} files", entry.DisplayName, entry.FolderName, previous.Version ?? "?", entry.Version ?? "?", entry.Files.Count);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        RaiseChanged();
+    }
+
     public IDisposable ReserveFolderName(string folderName)
     {
         if (!IsPlainFolderName(folderName))
