@@ -1,35 +1,175 @@
 <UserControl x:Class="DungeonsModLoader.App.Views.Pages.ProfilesPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <!-- DataContext: ProfilesViewModel. Profiles are coming soon. -->
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DungeonsModLoader.App.ViewModels.Pages">
+  <!--
+    DataContext: ProfilesViewModel.
+    Header / toolbar (New, Import) / busy bar / profile cards / footer. Row actions live on the page view model
+    and receive the row as parameter; the active card shows a badge instead of the Activate button.
+  -->
   <UserControl.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="pack://application:,,,/Views/Shell/PageStyles.xaml" />
       </ResourceDictionary.MergedDictionaries>
+
+      <Style x:Key="Profiles.SmallButton" TargetType="Button" BasedOn="{StaticResource Button.Secondary}">
+        <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+        <Setter Property="Margin" Value="8,0,0,0" />
+      </Style>
+
+      <Style x:Key="Profiles.SmallGhostButton" TargetType="Button" BasedOn="{StaticResource Button.Ghost}">
+        <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Secondary}" />
+        <Setter Property="Margin" Value="8,0,0,0" />
+      </Style>
+
+      <Style x:Key="Profiles.SmallPrimaryButton" TargetType="Button" BasedOn="{StaticResource Button.Primary}">
+        <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+        <Setter Property="Margin" Value="8,0,0,0" />
+      </Style>
+
+      <Style x:Key="Profiles.Card" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Setter Property="Padding" Value="16,14" />
+        <Setter Property="Margin" Value="0,0,0,10" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding IsActive}" Value="True">
+            <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+          </DataTrigger>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Setter Property="BorderBrush" Value="{StaticResource Brush.Border.Strong}" />
+          </Trigger>
+        </Style.Triggers>
+      </Style>
+
+      <!-- One profile: name + Active badge / counts and summary | actions. -->
+      <DataTemplate x:Key="Profiles.RowTemplate" DataType="{x:Type vm:ProfileRowViewModel}">
+        <Border Style="{StaticResource Profiles.Card}">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Style="{StaticResource Text.H3}" Text="{Binding Name}" VerticalAlignment="Center" />
+                <Border Style="{DynamicResource Badge.Accent}" Margin="10,0,0,0" VerticalAlignment="Center"
+                        Visibility="{Binding IsActive, Converter={StaticResource Converter.BoolToVisibility}}">
+                  <TextBlock Text="Active" />
+                </Border>
+              </StackPanel>
+              <TextBlock Style="{StaticResource Text.Small}" Margin="0,4,0,0">
+                <Run Text="{Binding ModCountText, Mode=OneWay}" /><Run Text="  ·  " /><Run Text="{Binding UpdatedText, Mode=OneWay}" />
+              </TextBlock>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding ModSummary}" TextTrimming="CharacterEllipsis" Margin="0,6,0,0" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+              <Button Style="{StaticResource Profiles.SmallPrimaryButton}" Content="Activate"
+                      Command="{Binding DataContext.ActivateCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                      CommandParameter="{Binding}"
+                      Visibility="{Binding IsActive, Converter={StaticResource Converter.BoolToVisibility.Inverse}}"
+                      ToolTip="Enable this profile's mods and disable all others" />
+              <Button Style="{StaticResource Profiles.SmallButton}" Content="Rename"
+                      Command="{Binding DataContext.RenameCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                      CommandParameter="{Binding}" />
+              <Button Style="{StaticResource Profiles.SmallButton}" Content="Duplicate"
+                      Command="{Binding DataContext.DuplicateCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                      CommandParameter="{Binding}" />
+              <Button Style="{StaticResource Profiles.SmallButton}" Content="Export..."
+                      Command="{Binding DataContext.ExportCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                      CommandParameter="{Binding}"
+                      ToolTip="Save this profile as a small .json file to share" />
+              <Button Content="Delete"
+                      Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                      CommandParameter="{Binding}"
+                      ToolTipService.ShowOnDisabled="True">
+                <Button.Style>
+                  <Style TargetType="Button" BasedOn="{StaticResource Profiles.SmallGhostButton}">
+                    <Setter Property="Foreground" Value="{StaticResource Brush.Danger}" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding IsActive}" Value="True">
+                        <Setter Property="ToolTip" Value="Switch to another profile before deleting this one" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Button.Style>
+              </Button>
+            </StackPanel>
+          </Grid>
+        </Border>
+      </DataTemplate>
     </ResourceDictionary>
   </UserControl.Resources>
 
   <Grid Margin="{StaticResource Padding.Page}">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
+    <!-- ============================ Header ============================ -->
     <StackPanel Grid.Row="0">
       <TextBlock Style="{StaticResource Text.H1}" Text="{Binding Title}" />
-      <TextBlock Style="{StaticResource Page.Subtitle}" Text="Named sets of enabled mods you can switch between." />
+      <TextBlock Style="{StaticResource Page.Subtitle}" Text="Named sets of enabled mods. Toggles on the Installed page change the active profile; activating another one moves mods in and out of ~mods." TextWrapping="Wrap" />
     </StackPanel>
 
-    <!-- Empty state -->
-    <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
-      <Path Style="{StaticResource EmptyState.Icon}" Data="{StaticResource Icon.Profiles}" />
-      <TextBlock Style="{StaticResource EmptyState.Headline}" Text="Profiles are coming soon" />
-      <Button Style="{DynamicResource Button.Secondary}"
-              Content="New profile"
-              IsEnabled="False"
-              HorizontalAlignment="Center"
-              ToolTip="Available in milestone 4" />
+    <!-- ============================ Toolbar ============================ -->
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,20,0,0">
+      <Button Style="{DynamicResource Button.Primary}" Content="New profile" Command="{Binding CreateCommand}" ToolTip="Create a profile from the mods that are enabled right now" />
+      <Button Style="{DynamicResource Button.Secondary}" Content="Import..." Command="{Binding ImportCommand}" Margin="12,0,0,0" ToolTip="Add a profile from a .json file someone shared" />
+      <Button Style="{DynamicResource Button.Ghost}" Content="Open profiles folder" Command="{Binding OpenProfilesFolderCommand}" Margin="12,0,0,0" />
+    </StackPanel>
+
+    <!-- ============================ Game-running note ============================ -->
+    <Border Grid.Row="2"
+            Style="{DynamicResource Card}"
+            Background="{StaticResource Brush.Warning.Faint}"
+            Padding="12,10"
+            Margin="0,16,0,0"
+            Visibility="{Binding IsGameRunning, Converter={StaticResource Converter.BoolToVisibility}}">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Border Grid.Column="0" Style="{DynamicResource Badge.Warning}" Margin="0,0,12,0" VerticalAlignment="Center">
+          <TextBlock Text="Game running" />
+        </Border>
+        <TextBlock Grid.Column="1" Style="{StaticResource Text.Body}" VerticalAlignment="Center" Text="Switching profiles is locked until the game closes." />
+      </Grid>
+    </Border>
+
+    <!-- ============================ Busy bar ============================ -->
+    <StackPanel Grid.Row="3" Margin="0,16,0,0"
+                Visibility="{Binding IsBusy, Converter={StaticResource Converter.BoolToVisibility}}">
+      <TextBlock Style="{StaticResource Text.Small}" Text="{Binding BusyText}" Margin="0,0,0,6" />
+      <ProgressBar IsIndeterminate="True" />
+    </StackPanel>
+
+    <!-- ============================ List ============================ -->
+    <ScrollViewer Grid.Row="4" Margin="0,16,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource Profiles.RowTemplate}" Focusable="False" />
+    </ScrollViewer>
+
+    <!-- ============================ Footer ============================ -->
+    <StackPanel Grid.Row="5">
+      <Separator Style="{DynamicResource Divider}" Margin="0,8,0,8" />
+      <TextBlock Style="{StaticResource Text.Small}" Text="{Binding FooterText}" />
     </StackPanel>
   </Grid>
 </UserControl>

@@ -193,13 +193,25 @@
     </StackPanel>
 
     <!-- ============================ Toolbar ============================ -->
-    <!-- Search | filter chips (wrap when the window is narrow) | Install from file. Bulk actions live in the footer. -->
+    <!-- Search | filter chips (wrap when the window is narrow) | profile dropdown | Install from file. Bulk actions live in the footer. -->
     <Grid Grid.Row="1" Margin="0,20,0,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
+
+      <!-- Active profile; picking another one applies it (moves folders) right away. -->
+      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top" Margin="16,0,0,0">
+        <TextBlock Style="{StaticResource Text.Small}" Text="Profile" VerticalAlignment="Center" Margin="0,0,8,0" />
+        <ComboBox Width="170"
+                  ItemsSource="{Binding ProfileNames}"
+                  SelectedItem="{Binding SelectedProfileName, Mode=TwoWay}"
+                  IsEnabled="{Binding CanMutate}"
+                  ToolTip="Switch profile: enables its mods and disables all others"
+                  AutomationProperties.Name="Profile" />
+      </StackPanel>
 
       <TextBox Grid.Column="0"
                Style="{DynamicResource TextBox.Search}"
@@ -221,7 +233,7 @@
       </WrapPanel>
 
       <!-- Centred on the 36px search box (28px button, 4px offset). -->
-      <Button Grid.Column="2"
+      <Button Grid.Column="3"
               Style="{StaticResource Installed.SmallButton}"
               Content="Install from file..."
               VerticalAlignment="Top"

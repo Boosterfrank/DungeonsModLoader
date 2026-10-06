@@ -132,8 +132,9 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Launches the game: makes sure the mod folders are in place (milestone 4 applies the active profile here),
-    /// then starts it through Steam, the Xbox app or the executable. Launch problems become a friendly dialog.
+    /// Launches the game: makes sure the mod folders are in place (the active profile always mirrors what is in
+    /// <c>~mods</c>, so a reconcile is all that is needed), then starts it through Steam, the Xbox app or the
+    /// executable. Launch problems become a friendly dialog.
     /// </summary>
     [RelayCommand]
     private async Task PlayAsync()
@@ -153,7 +154,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         SetStatus($"Launching {AppInfo.GameDisplayName}...", autoClear: false);
 
-        // Make sure the mod folders are in place (milestone 4 applies the active profile here). A permission
+        // Make sure the mod folders are in place and pick up anything added to ~mods by hand. A permission
         // problem offers the one-time fix; if the folders still cannot be prepared the user may launch anyway.
         if (!await PrepareModFoldersAsync())
         {

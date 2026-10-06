@@ -12,7 +12,7 @@ public class ModServiceInitializationTests
         temp.CreateMod("ModA");
         var context = new FakeGameContext(temp.Installation);
         var store = new JsonManifestStore(temp.Paths, NullLogger<JsonManifestStore>.Instance);
-        using var service = new ModService(context, store, NullLogger<ModService>.Instance);
+        using var service = new ModService(context, store, NullLogger<ModService>.Instance, ModServiceOptions.ManualImportOnly);
 
         await service.InitializeAsync();
         await service.ImportUnmanagedAsync("ModA");
@@ -49,7 +49,7 @@ public class ModServiceInitializationTests
         temp.CreateMod("ModA");
         var context = new FakeGameContext(temp.Installation);
         var store = new JsonManifestStore(temp.Paths, NullLogger<JsonManifestStore>.Instance);
-        using var service = new ModService(context, store, NullLogger<ModService>.Instance);
+        using var service = new ModService(context, store, NullLogger<ModService>.Instance, ModServiceOptions.ManualImportOnly);
         await service.InitializeAsync();
         var entry = await service.ImportUnmanagedAsync("ModA");
 

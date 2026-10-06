@@ -209,6 +209,10 @@ public sealed class ModInstaller : IModInstaller
                 }, CancellationToken.None).ConfigureAwait(false);
             }
 
+            // From the move until the manifest entry exists the folder is unrecorded; the reservation keeps the
+            // automatic adoption (watcher-triggered reconcile) from recording it as a hand-installed mod first.
+            using var reservation = _mods.ReserveFolderName(folderName);
+
             progress?.Report(new InstallProgress($"Installing {displayName}..."));
             try
             {

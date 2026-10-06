@@ -12,7 +12,7 @@ namespace DungeonsModLoader.App.ViewModels.Pages;
 public sealed partial class ModRowViewModel : ObservableObject
 {
     public const string UnknownAuthor = "Unknown author";
-    public const string UnmanagedSubtitle = "Found in ~mods - not managed yet";
+    public const string UnmanagedSubtitle = "Found in ~mods but could not be added yet (files in use or unreadable)";
     public const string MissingSubtitle = "Folder not found in ~mods or the disabled folder";
 
     /// <summary>Performs the enable/disable move for a row; returns false when it failed (the row then reverts).</summary>

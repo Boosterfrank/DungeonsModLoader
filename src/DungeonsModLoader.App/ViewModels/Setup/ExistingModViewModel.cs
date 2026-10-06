@@ -5,24 +5,25 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace DungeonsModLoader.App.ViewModels.Setup;
 
 /// <summary>
-/// A folder that already exists inside <c>~mods</c> but is not managed yet (setup step 2). The contents summary
-/// ("3 files · 12.4 MB · 1 pak") is computed on a background thread so a large mod never stalls the window.
+/// A mod folder that was already in <c>~mods</c> when setup ran and was added to the list automatically (setup
+/// step 2). The contents summary ("3 files · 12.4 MB · 1 pak") is computed on a background thread so a large mod
+/// never stalls the window.
 /// </summary>
-public sealed partial class UnmanagedFolderViewModel : ObservableObject
+public sealed partial class ExistingModViewModel : ObservableObject
 {
-    public UnmanagedFolderViewModel(string folderName, string folderPath)
+    public ExistingModViewModel(string displayName, string folderPath, bool isEnabled)
     {
-        FolderName = folderName;
+        DisplayName = displayName;
         FolderPath = folderPath;
+        IsEnabled = isEnabled;
     }
 
-    public string FolderName { get; }
+    public string DisplayName { get; }
 
     public string FolderPath { get; }
 
-    /// <summary>Checked by default: importing changes nothing on disk, so opting out is the exception.</summary>
-    [ObservableProperty]
-    private bool _isSelected = true;
+    /// <summary>False for a mod found in the disabled folder.</summary>
+    public bool IsEnabled { get; }
 
     [ObservableProperty]
     private string _summary = "Scanning…";

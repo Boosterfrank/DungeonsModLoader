@@ -153,6 +153,30 @@ public sealed class DialogService : IDialogService
         return files;
     }
 
+    public string? PickSaveFile(string title, string filter, string? defaultFileName = null)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = title,
+            Filter = filter,
+            FileName = defaultFileName ?? string.Empty,
+            AddExtension = true,
+            OverwritePrompt = true,
+            CheckPathExists = true,
+        };
+
+        var owner = FindOwner(null);
+        var picked = owner is not null ? dialog.ShowDialog(owner) : dialog.ShowDialog();
+        if (picked != true || string.IsNullOrWhiteSpace(dialog.FileName))
+        {
+            _logger.LogDebug("Save picker '{Title}' cancelled", title);
+            return null;
+        }
+
+        _logger.LogDebug("Save picker '{Title}' returned {File}", title, dialog.FileName);
+        return dialog.FileName;
+    }
+
     public Task<T> RunWithProgressAsync<T>(string title, Func<IProgress<ProgressUpdate>, CancellationToken, Task<T>> work, bool canCancel = true)
     {
         ArgumentNullException.ThrowIfNull(work);

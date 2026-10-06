@@ -47,6 +47,9 @@ public interface IDialogService
     /// </summary>
     IReadOnlyList<string> PickFiles(string title, string filter, bool multiSelect);
 
+    /// <summary>Save-as picker (system dialog). Returns the chosen path, or null when cancelled.</summary>
+    string? PickSaveFile(string title, string filter, string? defaultFileName = null);
+
     /// <summary>
     /// Shows a progress dialog while <paramref name="work"/> runs. The work starts on the UI thread's async context
     /// (so it must do its file I/O asynchronously) and may report progress from any thread; the dialog closes when

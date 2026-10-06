@@ -11,6 +11,7 @@ using DungeonsModLoader.Core;
 using DungeonsModLoader.Core.Game;
 using DungeonsModLoader.Core.Mods;
 using DungeonsModLoader.Core.Permissions;
+using DungeonsModLoader.Core.Profiles;
 using DungeonsModLoader.Core.Settings;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -114,7 +115,28 @@ public partial class App : Application
             return;
         }
 
+        await PrepareProfilesAsync(_host.Services);
         ShowMainWindow(_host.Services.GetRequiredService<MainWindow>());
+
+        // From here on, folders dropped into ~mods by hand are picked up while the app runs.
+        _host.Services.GetRequiredService<IModFolderWatcher>().Start();
+    }
+
+    /// <summary>
+    /// Loads the profiles (creating "Default" on the first run) once the mod store is ready. A failure here is
+    /// logged and does not stop the app: the Profiles page simply starts empty and the active profile is not
+    /// tracked until the next start.
+    /// </summary>
+    private async Task PrepareProfilesAsync(IServiceProvider services)
+    {
+        try
+        {
+            await services.GetRequiredService<IProfileService>().InitializeAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.Error(ex, "Profiles could not be loaded");
+        }
     }
 
     /// <summary>

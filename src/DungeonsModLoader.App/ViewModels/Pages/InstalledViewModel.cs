@@ -8,7 +8,7 @@ using DungeonsModLoader.Core;
 using DungeonsModLoader.Core.Game;
 using DungeonsModLoader.Core.Mods;
 using DungeonsModLoader.Core.Permissions;
-using DungeonsModLoader.Core.Settings;
+using DungeonsModLoader.Core.Profiles;
 using DungeonsModLoader.Nexus;
 using Microsoft.Extensions.Logging;
 
@@ -26,7 +26,7 @@ public enum ModFilter
 }
 
 /// <summary>
-/// Installed page: the mod list with enable/disable, install from file, import of unmanaged folders, rename and
+/// Installed page: the mod list with enable/disable, install from file, the profile dropdown, rename and
 /// uninstall. Rows mirror <see cref="IModService.Mods"/> + <see cref="IModService.UnmanagedFolders"/> and are
 /// updated in place (matched by id / folder name) whenever the service reports a change, so toggles never jump.
 /// Every mod-changing action is locked while the game is running or a long operation is in progress.
@@ -43,7 +43,8 @@ public sealed partial class InstalledViewModel : PageViewModel
     private readonly IModService _mods;
     private readonly IGameContext _game;
     private readonly IGameProcessMonitor _monitor;
-    private readonly ISettingsStore _settings;
+    private readonly IProfileService _profiles;
+    private readonly ProfilesViewModel _profilesPage;
     private readonly IDialogService _dialogs;
     private readonly IModStoreInitializer _initializer;
     private readonly IInstallCoordinator _installs;
@@ -53,11 +54,16 @@ public sealed partial class InstalledViewModel : PageViewModel
     /// <summary>Every known row by <see cref="ModRowViewModel.Key"/>, so refreshes reuse instances.</summary>
     private readonly Dictionary<string, ModRowViewModel> _rowsByKey = new(StringComparer.Ordinal);
 
+    /// <summary>True while the dropdown is being synced from the profile service (a selection change then means nothing).</summary>
+    private bool _syncingProfiles;
+    private string? _selectedProfileName;
+
     public InstalledViewModel(
         IModService mods,
         IGameContext game,
         IGameProcessMonitor monitor,
-        ISettingsStore settings,
+        IProfileService profiles,
+        ProfilesViewModel profilesPage,
         IDialogService dialogs,
         IModStoreInitializer initializer,
         IInstallCoordinator installs,
@@ -67,7 +73,8 @@ public sealed partial class InstalledViewModel : PageViewModel
         _mods = mods;
         _game = game;
         _monitor = monitor;
-        _settings = settings;
+        _profiles = profiles;
+        _profilesPage = profilesPage;
         _dialogs = dialogs;
         _initializer = initializer;
         _installs = installs;
@@ -75,14 +82,15 @@ public sealed partial class InstalledViewModel : PageViewModel
         _logger = logger;
 
         _isGameRunning = _monitor.IsGameRunning;
-        _activeProfile = _settings.Current.ActiveProfile;
+        _activeProfile = _profiles.ActiveProfileName;
 
         _mods.Changed += OnModsChanged;
         _monitor.GameRunningChanged += OnGameRunningChanged;
-        _settings.Saved += OnSettingsSaved;
+        _profiles.Changed += OnProfilesChanged;
 
-        // The service may already be initialized (or not; then the Changed event fills the list later).
+        // The services may already be initialized (or not; then their Changed events fill the lists later).
         RebuildRows();
+        SyncProfiles();
     }
 
     public override string Title => "Installed";
@@ -92,6 +100,87 @@ public sealed partial class InstalledViewModel : PageViewModel
 
     /// <summary>The rows that pass <see cref="SearchText"/> and <see cref="Filter"/>, in <see cref="Rows"/> order.</summary>
     public ObservableCollection<ModRowViewModel> VisibleRows { get; } = new();
+
+    // ----------------------------------------------------------------------------------------------------------
+    // Profiles dropdown
+    // ----------------------------------------------------------------------------------------------------------
+
+    /// <summary>Profile names for the dropdown, in the profile service's order (Default first).</summary>
+    public ObservableCollection<string> ProfileNames { get; } = new();
+
+    /// <summary>
+    /// The dropdown selection. Set from the UI it switches to that profile (moving folders); when the switch is
+    /// refused or fails the selection snaps back to the active profile.
+    /// </summary>
+    public string? SelectedProfileName
+    {
+        get => _selectedProfileName;
+        set
+        {
+            if (string.Equals(_selectedProfileName, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _selectedProfileName = value;
+            OnPropertyChanged();
+
+            if (!_syncingProfiles && value is not null && !string.Equals(value, _profiles.ActiveProfileName, StringComparison.OrdinalIgnoreCase))
+            {
+                _ = SwitchProfileAsync(value);
+            }
+        }
+    }
+
+    private async Task SwitchProfileAsync(string name)
+    {
+        _logger.LogInformation("Profile '{Name}' picked from the Installed page dropdown", name);
+        var switched = await _profilesPage.SwitchToAsync(name);
+        if (!switched)
+        {
+            SyncProfiles();
+        }
+    }
+
+    private void OnProfilesChanged(object? sender, EventArgs e) => OnUiThread(SyncProfiles);
+
+    private void SyncProfiles()
+    {
+        _syncingProfiles = true;
+        try
+        {
+            var names = _profiles.Profiles.Select(p => p.Name).ToList();
+            for (var i = 0; i < names.Count; i++)
+            {
+                if (i < ProfileNames.Count && string.Equals(ProfileNames[i], names[i], StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var existing = ProfileNames.IndexOf(names[i]);
+                if (existing >= 0)
+                {
+                    ProfileNames.Move(existing, i);
+                }
+                else
+                {
+                    ProfileNames.Insert(i, names[i]);
+                }
+            }
+
+            while (ProfileNames.Count > names.Count)
+            {
+                ProfileNames.RemoveAt(ProfileNames.Count - 1);
+            }
+
+            ActiveProfile = _profiles.ActiveProfileName;
+            SelectedProfileName = _profiles.IsInitialized ? _profiles.ActiveProfileName : null;
+        }
+        finally
+        {
+            _syncingProfiles = false;
+        }
+    }
 
     // ----------------------------------------------------------------------------------------------------------
     // Search & filter
@@ -276,6 +365,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         });
     }
 
+    /// <summary>Retries adding a folder that the automatic detection could not read (files in use, unreadable).</summary>
     [RelayCommand(CanExecute = nameof(CanImport))]
     private async Task ImportAsync(ModRowViewModel? row)
     {
@@ -284,9 +374,9 @@ public sealed partial class InstalledViewModel : PageViewModel
             return;
         }
 
-        await RunBusyAsync($"Importing {row.DisplayName}...", async () =>
+        await RunBusyAsync($"Adding {row.DisplayName}...", async () =>
         {
-            var imported = await RunModOperationAsync($"Could not import {row.DisplayName}", async () =>
+            var imported = await RunModOperationAsync($"Could not add {row.DisplayName}", async () =>
             {
                 var entry = await _mods.ImportUnmanagedAsync(row.FolderName);
                 _logger.LogInformation("Imported unmanaged folder {Folder} as {Name} ({Id})", row.FolderName, entry.DisplayName, entry.Id);
@@ -592,8 +682,6 @@ public sealed partial class InstalledViewModel : PageViewModel
     private void OnModsChanged(object? sender, EventArgs e) => OnUiThread(RebuildRows);
 
     private void OnGameRunningChanged(object? sender, bool running) => OnUiThread(() => IsGameRunning = running);
-
-    private void OnSettingsSaved(object? sender, EventArgs e) => OnUiThread(() => ActiveProfile = _settings.Current.ActiveProfile);
 
     /// <summary>Syncs <see cref="Rows"/> with the service, reusing row instances so nothing flickers or jumps.</summary>
     private void RebuildRows()

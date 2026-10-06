@@ -12,7 +12,8 @@ public class ModServiceTests
     {
         var context = new FakeGameContext(configured ? temp.Installation : null);
         var store = new JsonManifestStore(temp.Paths, NullLogger<JsonManifestStore>.Instance);
-        var service = new ModService(context, store, NullLogger<ModService>.Instance);
+        // These tests exercise the manual import path; automatic adoption has its own test class.
+        var service = new ModService(context, store, NullLogger<ModService>.Instance, ModServiceOptions.ManualImportOnly);
         return (service, context, store);
     }
 

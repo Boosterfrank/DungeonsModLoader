@@ -13,8 +13,8 @@ using Microsoft.Extensions.Logging;
 namespace DungeonsModLoader.App.ViewModels.Setup;
 
 /// <summary>
-/// First-run setup wizard: 1. find the game, 2. import mods already in <c>~mods</c>, 3. done.
-/// The window shows this modally; <see cref="CloseRequested"/> carries the dialog result (true = finished,
+/// First-run setup wizard: 1. find the game, 2. show the mods already in <c>~mods</c> (added automatically),
+/// 3. done. The window shows this modally; <see cref="CloseRequested"/> carries the dialog result (true = finished,
 /// false = cancelled; the app cannot run without a game folder, so cancelling closes the app).
 /// </summary>
 public sealed partial class SetupViewModel : ObservableObject, IDisposable
@@ -70,7 +70,8 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<InstallCandidateViewModel> Candidates { get; } = new();
 
-    public ObservableCollection<UnmanagedFolderViewModel> UnmanagedFolders { get; } = new();
+    /// <summary>Mods that were already in the mod folders and have been added to the list (step 2).</summary>
+    public ObservableCollection<ExistingModViewModel> ExistingMods { get; } = new();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsGameFolderStep), nameof(IsExistingModsStep), nameof(IsDoneStep))]
@@ -105,12 +106,16 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     private InstallCandidateViewModel? _appliedInstallation;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(NoUnmanagedFolders))]
-    private bool _hasUnmanagedFolders;
+    [NotifyPropertyChangedFor(nameof(NoExistingMods))]
+    private bool _hasExistingMods;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ImportedSummary))]
-    private int _importedCount;
+    [NotifyPropertyChangedFor(nameof(FoundSummary))]
+    private int _foundCount;
+
+    /// <summary>Folders in ~mods that could not be added (files in use, unreadable); null hides the note.</summary>
+    [ObservableProperty]
+    private string? _notAddedNote;
 
     public bool IsGameFolderStep => CurrentStep == SetupStep.GameFolder;
     public bool IsExistingModsStep => CurrentStep == SetupStep.ExistingMods;
@@ -120,7 +125,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     public bool ShowCancel => CurrentStep != SetupStep.Done;
 
     public bool NothingFound => !IsSearching && Candidates.Count == 0;
-    public bool NoUnmanagedFolders => !HasUnmanagedFolders;
+    public bool NoExistingMods => !HasExistingMods;
 
     public string StepTitle => CurrentStep switch
     {
@@ -132,17 +137,17 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     public string StepDescription => CurrentStep switch
     {
         SetupStep.GameFolder => $"We'll look for {AppInfo.GameDisplayName} on this PC. Pick the install you want to manage mods for.",
-        SetupStep.ExistingMods => "These folders are already in ~mods. Import them to manage them here; nothing is moved or deleted.",
+        SetupStep.ExistingMods => "Mods that were already in ~mods have been added to your list automatically. Nothing was moved or deleted.",
         _ => $"{AppInfo.DisplayName} is ready. Here's what was set up.",
     };
 
     public string NextText => CurrentStep == SetupStep.Done ? "Finish" : "Next";
 
-    public string ImportedSummary => ImportedCount switch
+    public string FoundSummary => FoundCount switch
     {
-        0 => "No mods imported",
-        1 => "1 mod imported",
-        var n => $"{n} mods imported",
+        0 => "No existing mods found",
+        1 => "1 existing mod added",
+        var n => $"{n} existing mods added",
     };
 
     /// <summary>Called by the window once it is shown: runs game detection for step 1.</summary>
@@ -231,14 +236,13 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
             case SetupStep.GameFolder:
                 if (await ApplyGameFolderAsync())
                 {
-                    LoadUnmanagedFolders();
+                    LoadExistingMods();
                     CurrentStep = SetupStep.ExistingMods;
                 }
 
                 break;
 
             case SetupStep.ExistingMods:
-                await ImportSelectedAsync();
                 CurrentStep = SetupStep.Done;
                 break;
 
@@ -260,8 +264,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
                 break;
 
             case SetupStep.Done:
-                // Folders imported on the way forward are managed now; re-read what is still unmanaged.
-                LoadUnmanagedFolders();
+                LoadExistingMods();
                 CurrentStep = SetupStep.ExistingMods;
                 break;
         }
@@ -369,8 +372,9 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Runs <see cref="IModService.InitializeAsync"/>; on an access-denied error offers the one-time permission fix
-    /// and retries once. Any other failure is shown and keeps the user on the step.
+    /// Runs <see cref="IModService.InitializeAsync"/> (which also adopts the folders already in ~mods); on an
+    /// access-denied error offers the one-time permission fix and retries once. Any other failure is shown and
+    /// keeps the user on the step.
     /// </summary>
     private async Task<bool> InitializeModsAsync(GameInstallation installation)
     {
@@ -453,80 +457,27 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     }
 
     // ------------------------------------------------------------------------------------------------------
-    // Step 2: existing mods
+    // Step 2: existing mods (already adopted by the mod store during initialization)
     // ------------------------------------------------------------------------------------------------------
 
-    private void LoadUnmanagedFolders()
+    private void LoadExistingMods()
     {
-        UnmanagedFolders.Clear();
-
-        var modsDirectory = _gameContext.Current?.ModsDirectory;
-        foreach (var name in _mods.UnmanagedFolders)
+        ExistingMods.Clear();
+        foreach (var mod in _mods.Mods.Where(m => !m.IsMissing && m.FolderPath is not null))
         {
-            var path = modsDirectory is null ? name : Path.Combine(modsDirectory, name);
-            var row = new UnmanagedFolderViewModel(name, path);
-            UnmanagedFolders.Add(row);
+            var row = new ExistingModViewModel(mod.Entry.DisplayName, mod.FolderPath!, mod.IsEnabled);
+            ExistingMods.Add(row);
             _ = row.LoadSummaryAsync(_lifetime.Token);
         }
 
-        HasUnmanagedFolders = UnmanagedFolders.Count > 0;
-        _logger.LogInformation("Setup lists {Count} unmanaged folder(s) in ~mods", UnmanagedFolders.Count);
-    }
+        HasExistingMods = ExistingMods.Count > 0;
+        FoundCount = ExistingMods.Count;
 
-    /// <summary>Imports every checked folder one after another; failures are collected and reported once.</summary>
-    private async Task ImportSelectedAsync()
-    {
-        var selected = UnmanagedFolders.Where(f => f.IsSelected).ToList();
-        if (selected.Count == 0)
-        {
-            return;
-        }
-
-        var failures = new List<(string Name, Exception Error)>();
-        var imported = 0;
-
-        IsBusy = true;
-        try
-        {
-            foreach (var row in selected)
-            {
-                BusyText = $"Importing {row.FolderName}…";
-                try
-                {
-                    await _mods.ImportUnmanagedAsync(row.FolderName, cancellationToken: _lifetime.Token);
-                    imported++;
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Importing {Folder} failed", row.FolderName);
-                    failures.Add((row.FolderName, ex));
-                }
-            }
-        }
-        finally
-        {
-            IsBusy = false;
-            BusyText = null;
-        }
-
-        ImportedCount += imported;
-        _logger.LogInformation("Imported {Imported} of {Selected} existing mod folder(s)", imported, selected.Count);
-
-        if (failures.Count > 0)
-        {
-            var names = string.Join(", ", failures.Select(f => f.Name));
-            var details = string.Join(
-                Environment.NewLine + Environment.NewLine,
-                failures.Select(f => $"{f.Name}:{Environment.NewLine}{f.Error}"));
-            await _dialogs.ShowErrorAsync(
-                "Some mods were not imported",
-                $"{failures.Count} of {selected.Count} folders could not be imported: {names}. They stay in ~mods untouched; you can import them later from the Installed page.",
-                details);
-        }
+        var notAdded = _mods.UnmanagedFolders;
+        NotAddedNote = notAdded.Count == 0
+            ? null
+            : $"Could not add yet (files in use or unreadable): {string.Join(", ", notAdded)}. They will be added when they can be read.";
+        _logger.LogInformation("Setup lists {Count} existing mod(s) and {NotAdded} folder(s) that could not be added", ExistingMods.Count, notAdded.Count);
     }
 
     // ------------------------------------------------------------------------------------------------------
@@ -541,8 +492,8 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         {
             _settings.Current.FirstRunCompleted = true;
             await _settings.SaveAsync(_lifetime.Token);
-            _logger.LogInformation("First-run setup completed for {Root} ({Source}); {Imported} mod(s) imported",
-                _settings.Current.GameRootPath, _settings.Current.GameSource, ImportedCount);
+            _logger.LogInformation("First-run setup completed for {Root} ({Source}); {Found} existing mod(s)",
+                _settings.Current.GameRootPath, _settings.Current.GameSource, FoundCount);
             RequestClose(true);
         }
         catch (OperationCanceledException)

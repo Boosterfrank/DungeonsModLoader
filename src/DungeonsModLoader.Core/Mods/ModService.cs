@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using DungeonsModLoader.Core.Game;
+using DungeonsModLoader.Core.Install;
 using Microsoft.Extensions.Logging;
 
 namespace DungeonsModLoader.Core.Mods;
@@ -13,6 +14,11 @@ namespace DungeonsModLoader.Core.Mods;
 /// Every path this service touches is derived from a validated plain folder name under one of the two mod
 /// folders, so game files are never moved or deleted by mistake.
 /// </para>
+/// <para>
+/// Reconciling also <em>adopts</em>: a folder that appears in <c>~mods</c> (or in the disabled folder) without a
+/// manifest entry was put there by hand, so it is recorded as a local mod right away; loose pak sets lying
+/// directly in <c>~mods</c> are first wrapped into a folder of their own. Nothing is ever deleted by adoption.
+/// </para>
 /// </summary>
 public sealed class ModService : IModService, IDisposable
 {
@@ -21,18 +27,24 @@ public sealed class ModService : IModService, IDisposable
     private readonly IGameContext _gameContext;
     private readonly IManifestStore _manifestStore;
     private readonly ILogger<ModService> _logger;
+    private readonly ModServiceOptions _options;
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>Folder names an installer is about to record itself; adoption and the unmanaged list skip them.</summary>
+    private readonly HashSet<string> _reserved = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _reservedLock = new();
 
     private Manifest _manifest = new();
     private ImmutableArray<ModInfo> _mods = ImmutableArray<ModInfo>.Empty;
     private ImmutableArray<string> _unmanaged = ImmutableArray<string>.Empty;
     private bool _disposed;
 
-    public ModService(IGameContext gameContext, IManifestStore manifestStore, ILogger<ModService> logger)
+    public ModService(IGameContext gameContext, IManifestStore manifestStore, ILogger<ModService> logger, ModServiceOptions? options = null)
     {
         _gameContext = gameContext;
         _manifestStore = manifestStore;
         _logger = logger;
+        _options = options ?? ModServiceOptions.Default;
         _gameContext.Changed += OnGameContextChanged;
     }
 
@@ -65,7 +77,7 @@ public sealed class ModService : IModService, IDisposable
                 try
                 {
                     _manifest = await _manifestStore.LoadAsync(cancellationToken).ConfigureAwait(false);
-                    await Task.Run(() => ReconcileCore(installation), cancellationToken).ConfigureAwait(false);
+                    await ReconcileCoreAsync(installation, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -112,14 +124,14 @@ public sealed class ModService : IModService, IDisposable
             if (installation is null)
             {
                 raise = ClearStateCore();
-                result = new ReconcileResult(Array.Empty<string>(), Array.Empty<ModEntry>());
+                result = new ReconcileResult(Array.Empty<string>(), Array.Empty<ModEntry>(), Array.Empty<ModEntry>());
             }
             else
             {
                 var before = (_mods, _unmanaged);
-                await Task.Run(() => ReconcileCore(installation), cancellationToken).ConfigureAwait(false);
-                raise = HasSnapshotChanged(before.Item1, before.Item2, _mods, _unmanaged);
-                result = new ReconcileResult(_unmanaged, _mods.Where(m => m.IsMissing).Select(m => m.Entry).ToList());
+                var adopted = await ReconcileCoreAsync(installation, cancellationToken).ConfigureAwait(false);
+                raise = adopted.Count > 0 || HasSnapshotChanged(before.Item1, before.Item2, _mods, _unmanaged);
+                result = new ReconcileResult(_unmanaged, _mods.Where(m => m.IsMissing).Select(m => m.Entry).ToList(), adopted);
             }
         }
         finally
@@ -200,6 +212,102 @@ public sealed class ModService : IModService, IDisposable
         return failures;
     }
 
+    public async Task ApplyEnabledStatesAsync(IReadOnlySet<Guid> enabledModIds, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(enabledModIds);
+
+        var raise = false;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var installation = RequireInstallation();
+            var moves = new List<(ModEntry Entry, bool Enable)>();
+            foreach (var entry in _manifest.Mods)
+            {
+                var state = ComputeState(installation, entry, warnOnDuplicate: false);
+                if (state == ModState.Missing)
+                {
+                    continue;
+                }
+
+                var enable = enabledModIds.Contains(entry.Id);
+                if ((state == ModState.Enabled) != enable)
+                {
+                    moves.Add((entry, enable));
+                }
+            }
+
+            if (moves.Count == 0)
+            {
+                _logger.LogDebug("Apply: nothing to move");
+                return;
+            }
+
+            _logger.LogInformation("Apply: enabling {Enable} and disabling {Disable} mod(s)", moves.Count(m => m.Enable), moves.Count(m => !m.Enable));
+            var done = new List<(ModEntry Entry, bool Enabled)>();
+            try
+            {
+                foreach (var (entry, enable) in moves)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    progress?.Report($"{(enable ? "Enabling" : "Disabling")} {entry.DisplayName}...");
+                    await Task.Run(() => MoveModCore(installation, entry, enable), CancellationToken.None).ConfigureAwait(false);
+                    done.Add((entry, enable));
+                }
+
+                raise = true;
+            }
+            catch (Exception ex)
+            {
+                raise = done.Count > 0;
+                var rolledBack = RollBack(installation, done);
+                if (ex is OperationCanceledException)
+                {
+                    _logger.LogInformation("Apply cancelled after {Done} move(s); rolled back: {RolledBack}", done.Count, rolledBack);
+                    throw;
+                }
+
+                var (failed, enable) = moves[done.Count];
+                _logger.LogWarning(ex, "Apply failed at '{Mod}' ({Action}); {Done} earlier move(s) rolled back: {RolledBack}", failed.DisplayName, enable ? "enable" : "disable", done.Count, rolledBack);
+                throw new ModApplyException(failed, enable, rolledBack, ex);
+            }
+            finally
+            {
+                TryRefreshSnapshot(installation);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        if (raise)
+        {
+            RaiseChanged();
+        }
+    }
+
+    /// <summary>Undoes the moves in <paramref name="done"/> in reverse order; true when every one of them was undone.</summary>
+    private bool RollBack(GameInstallation installation, List<(ModEntry Entry, bool Enabled)> done)
+    {
+        var complete = true;
+        for (var i = done.Count - 1; i >= 0; i--)
+        {
+            var (entry, enabled) = done[i];
+            try
+            {
+                MoveModCore(installation, entry, !enabled);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                complete = false;
+                _logger.LogError(ex, "Rollback could not move '{Mod}' back", entry.DisplayName);
+            }
+        }
+
+        return complete;
+    }
+
     public async Task<ModEntry> ImportUnmanagedAsync(string folderName, string? displayName = null, CancellationToken cancellationToken = default)
     {
         if (!IsPlainFolderName(folderName))
@@ -241,22 +349,40 @@ public sealed class ModService : IModService, IDisposable
         try
         {
             var installation = RequireInstallation();
-            EnsureUnmanagedFolder(installation, folderName, folderPath);
 
-            var now = DateTimeOffset.UtcNow;
-            entry = new ModEntry
+            // A reconcile may have adopted the folder while it was being hashed: that entry is the answer.
+            var adopted = _manifest.Mods.FirstOrDefault(m => string.Equals(m.FolderName, folderName, StringComparison.OrdinalIgnoreCase));
+            if (adopted is not null && adopted.Source == ModSource.Local)
             {
-                FolderName = actualName,
-                DisplayName = string.IsNullOrWhiteSpace(displayName) ? actualName : displayName.Trim(),
-                Source = ModSource.Local,
-                InstalledAt = now,
-                UpdatedAt = now,
-                Files = files,
-            };
+                _logger.LogInformation("Folder '{Folder}' was adopted automatically while being imported", folderName);
+                if (!string.IsNullOrWhiteSpace(displayName) && !string.Equals(adopted.DisplayName, displayName.Trim(), StringComparison.Ordinal))
+                {
+                    var previous = adopted.DisplayName;
+                    adopted.DisplayName = displayName.Trim();
+                    await SaveManifestOrRevertAsync(() => adopted.DisplayName = previous, installation, cancellationToken).ConfigureAwait(false);
+                }
 
-            _manifest.Mods.Add(entry);
-            await SaveManifestOrRevertAsync(() => _manifest.Mods.Remove(entry), installation, cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("Imported unmanaged folder '{Folder}' as '{Mod}' ({Files} files)", actualName, entry.DisplayName, files.Count);
+                entry = adopted;
+            }
+            else
+            {
+                EnsureUnmanagedFolder(installation, folderName, folderPath);
+
+                var now = DateTimeOffset.UtcNow;
+                entry = new ModEntry
+                {
+                    FolderName = actualName,
+                    DisplayName = string.IsNullOrWhiteSpace(displayName) ? actualName : displayName.Trim(),
+                    Source = ModSource.Local,
+                    InstalledAt = now,
+                    UpdatedAt = now,
+                    Files = files,
+                };
+
+                _manifest.Mods.Add(entry);
+                await SaveManifestOrRevertAsync(() => _manifest.Mods.Remove(entry), installation, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Imported unmanaged folder '{Folder}' as '{Mod}' ({Files} files)", actualName, entry.DisplayName, files.Count);
+            }
         }
         finally
         {
@@ -358,6 +484,54 @@ public sealed class ModService : IModService, IDisposable
         }
 
         RaiseChanged();
+    }
+
+    public IDisposable ReserveFolderName(string folderName)
+    {
+        if (!IsPlainFolderName(folderName))
+        {
+            throw new ArgumentException($"'{folderName}' is not a valid folder name.", nameof(folderName));
+        }
+
+        lock (_reservedLock)
+        {
+            _reserved.Add(folderName);
+        }
+
+        return new Reservation(this, folderName);
+    }
+
+    private void ReleaseReservation(string folderName)
+    {
+        lock (_reservedLock)
+        {
+            _reserved.Remove(folderName);
+        }
+    }
+
+    private bool IsReserved(string folderName)
+    {
+        lock (_reservedLock)
+        {
+            return _reserved.Contains(folderName);
+        }
+    }
+
+    private sealed class Reservation : IDisposable
+    {
+        private readonly string _folderName;
+        private ModService? _owner;
+
+        public Reservation(ModService owner, string folderName)
+        {
+            _owner = owner;
+            _folderName = folderName;
+        }
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _owner, null)?.ReleaseReservation(_folderName);
+        }
     }
 
     public async Task RenameAsync(Guid modId, string displayName, CancellationToken cancellationToken = default)
@@ -549,13 +723,230 @@ public sealed class ModService : IModService, IDisposable
         return hadState;
     }
 
-    /// <summary>Ensures both mod folders exist, then rebuilds the snapshots. Runs under the gate.</summary>
-    private void ReconcileCore(GameInstallation installation)
+    /// <summary>Ensures both mod folders exist, rebuilds the snapshots and adopts new folders. Runs under the gate.</summary>
+    private async Task<List<ModEntry>> ReconcileCoreAsync(GameInstallation installation, CancellationToken cancellationToken)
     {
-        EnsureDirectory(installation.ModsDirectory);
-        EnsureDirectory(installation.DisabledModsDirectory);
-        CleanupInternalFolders(installation);
+        await Task.Run(
+            () =>
+            {
+                EnsureDirectory(installation.ModsDirectory);
+                EnsureDirectory(installation.DisabledModsDirectory);
+                CleanupInternalFolders(installation);
+                RefreshSnapshotCore(installation);
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (!_options.AdoptUnmanagedFolders)
+        {
+            return new List<ModEntry>();
+        }
+
+        return await AdoptNewFoldersAsync(installation, cancellationToken).ConfigureAwait(false);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Adoption of mods installed by hand
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Records every folder in <c>~mods</c> (and every orphan in the disabled folder) that has no manifest entry as a
+    /// local mod. Folders that cannot be read right now (still being copied, locked) stay unmanaged and are tried
+    /// again on the next reconcile. Runs under the gate.
+    /// </summary>
+    private async Task<List<ModEntry>> AdoptNewFoldersAsync(GameInstallation installation, CancellationToken cancellationToken)
+    {
+        if (_options.AdoptLooseFiles)
+        {
+            await Task.Run(() => WrapLooseFiles(installation), cancellationToken).ConfigureAwait(false);
+        }
+
+        var candidates = new List<(string Name, string Path, bool Enabled)>();
+        foreach (var name in ListUnmanagedFolders(installation.ModsDirectory))
+        {
+            candidates.Add((name, Path.Combine(installation.ModsDirectory, name), true));
+        }
+
+        foreach (var name in ListUnmanagedFolders(installation.DisabledModsDirectory))
+        {
+            if (candidates.Any(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.LogWarning(
+                    "Folder '{Folder}' exists in both {Mods} and {Disabled}; the copy in ~mods is adopted and the other one is left untouched",
+                    name,
+                    installation.ModsDirectory,
+                    installation.DisabledModsDirectory);
+                continue;
+            }
+
+            candidates.Add((name, Path.Combine(installation.DisabledModsDirectory, name), false));
+        }
+
+        var adopted = new List<ModEntry>();
+        foreach (var (name, path, enabled) in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (IsReserved(name))
+            {
+                continue;
+            }
+
+            try
+            {
+                var files = await FileHasher.HashDirectoryAsync(path, cancellationToken).ConfigureAwait(false);
+                var now = DateTimeOffset.UtcNow;
+                var entry = new ModEntry
+                {
+                    FolderName = name,
+                    DisplayName = name,
+                    Source = ModSource.Local,
+                    InstalledAt = now,
+                    UpdatedAt = now,
+                    Files = files,
+                };
+                _manifest.Mods.Add(entry);
+                adopted.Add(entry);
+                _logger.LogInformation("Adopted '{Folder}' found in {Where} as a local mod ({Files} files)", name, enabled ? "~mods" : "the disabled folder", files.Count);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Folder '{Folder}' in {Path} could not be read yet; it stays unmanaged until the next check", name, path);
+            }
+        }
+
+        if (adopted.Count > 0)
+        {
+            try
+            {
+                await _manifestStore.SaveAsync(_manifest, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Keep memory consistent with disk: the folders stay unmanaged and the Import button reports the problem.
+                _logger.LogError(ex, "The manifest could not be saved after adopting {Count} folder(s); they stay unmanaged", adopted.Count);
+                foreach (var entry in adopted)
+                {
+                    _manifest.Mods.Remove(entry);
+                }
+
+                adopted.Clear();
+            }
+        }
+
         RefreshSnapshotCore(installation);
+        return adopted;
+    }
+
+    /// <summary>Plain-named folders directly inside <paramref name="parent"/> that no manifest entry owns, excluding internal and reserved ones.</summary>
+    private IReadOnlyList<string> ListUnmanagedFolders(string parent)
+    {
+        var managed = new HashSet<string>(_manifest.Mods.Select(m => m.FolderName), StringComparer.OrdinalIgnoreCase);
+        List<string> names;
+        try
+        {
+            if (!Directory.Exists(parent))
+            {
+                return Array.Empty<string>();
+            }
+
+            names = Directory.EnumerateDirectories(parent).Select(Path.GetFileName).Where(n => n is not null).Select(n => n!).ToList();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new ModAccessDeniedException(parent, ex);
+        }
+
+        return names
+            .Where(name => IsPlainFolderName(name) && !managed.Contains(name) && !IsInternalFolder(name) && !IsReserved(name))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Moves pak sets that lie directly in <c>~mods</c> (<c>Name_P.pak</c> + <c>.ucas</c> + <c>.utoc</c>, or a lone
+    /// <c>.pak</c>) into a folder named after the pak so they can be managed. Incomplete sets are left alone; a
+    /// set whose files cannot all be moved is put back where it was.
+    /// </summary>
+    private void WrapLooseFiles(GameInstallation installation)
+    {
+        List<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(installation.ModsDirectory)
+                .Where(InstallSource.IsModFile)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Loose files in {Mods} could not be listed", installation.ModsDirectory);
+            return;
+        }
+
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var group in files.GroupBy(f => Path.GetFileNameWithoutExtension(f) ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+        {
+            var extensions = group.Select(f => Path.GetExtension(f).ToLowerInvariant()).ToHashSet();
+            var complete = extensions.Contains(".pak") && extensions.Contains(".ucas") && extensions.Contains(".utoc");
+            var pakOnly = extensions.Count == 1 && extensions.Contains(".pak");
+            if (!complete && !pakOnly)
+            {
+                _logger.LogWarning("Loose mod files for '{Base}' in ~mods are incomplete ({Extensions}); leaving them where they are", group.Key, string.Join(", ", extensions));
+                continue;
+            }
+
+            var baseName = group.Key.Length == 0 ? "Mod" : group.Key;
+            var display = baseName.EndsWith("_P", StringComparison.OrdinalIgnoreCase) && baseName.Length > 2 ? baseName[..^2] : baseName;
+            var folderName = FolderNameSanitizer.MakeUnique(
+                FolderNameSanitizer.Sanitize(display),
+                candidate => Directory.Exists(Path.Combine(installation.ModsDirectory, candidate))
+                             || Directory.Exists(Path.Combine(installation.DisabledModsDirectory, candidate))
+                             || _manifest.Mods.Any(m => string.Equals(m.FolderName, candidate, StringComparison.OrdinalIgnoreCase)));
+            var target = Path.Combine(installation.ModsDirectory, folderName);
+
+            var moved = new List<(string From, string To)>();
+            try
+            {
+                Directory.CreateDirectory(target);
+                foreach (var file in group)
+                {
+                    var to = Path.Combine(target, Path.GetFileName(file));
+                    File.Move(file, to);
+                    moved.Add((file, to));
+                }
+
+                _logger.LogInformation("Moved loose mod files {Files} from ~mods into the folder '{Folder}'", group.Select(Path.GetFileName).ToList(), folderName);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Loose mod files for '{Base}' could not be moved into '{Folder}'; putting them back", baseName, folderName);
+                foreach (var (from, to) in moved)
+                {
+                    try
+                    {
+                        File.Move(to, from);
+                    }
+                    catch (Exception undoError) when (undoError is IOException or UnauthorizedAccessException)
+                    {
+                        _logger.LogError(undoError, "Could not move {File} back to ~mods", to);
+                    }
+                }
+
+                try
+                {
+                    if (Directory.Exists(target) && !Directory.EnumerateFileSystemEntries(target).Any())
+                    {
+                        Directory.Delete(target);
+                    }
+                }
+                catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogDebug(cleanupError, "Empty folder {Folder} could not be removed", target);
+                }
+            }
+        }
     }
 
     /// <summary>Prefix of the app's own temporary folders (install staging); never shown as mods, deleted when stale.</summary>
@@ -609,7 +1000,7 @@ public sealed class ModService : IModService, IDisposable
             {
                 unmanaged = Directory.EnumerateDirectories(installation.ModsDirectory)
                     .Select(Path.GetFileName)
-                    .Where(name => !string.IsNullOrEmpty(name) && !managed.Contains(name) && !IsInternalFolder(name))
+                    .Where(name => !string.IsNullOrEmpty(name) && !managed.Contains(name) && !IsInternalFolder(name) && !IsReserved(name))
                     .Select(name => name!)
                     .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                     .ToImmutableArray();

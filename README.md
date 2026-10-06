@@ -23,7 +23,7 @@ Or open `DungeonsModLoader.sln` in Visual Studio 2022 and press F5.
 Developer switches:
 
 - `--swatch` opens the theme swatch window (design tokens, typography, control gallery).
-- `--data-dir <folder>` uses an isolated app data folder (settings, manifest, logs, cache) instead of `%LOCALAPPDATA%\DungeonsModLoader`.
+- `--data-dir <folder>` uses an isolated app data folder (settings, manifest, profiles, logs, cache) instead of `%LOCALAPPDATA%\DungeonsModLoader`.
 
 ## Solution layout
 
@@ -45,6 +45,23 @@ installer/
 - Enabled mods: `<GameRoot>\Dungeons\Content\Paks\~mods\<ModFolder>\`
 - Disabled mods: `<GameRoot>\Dungeons\DungeonsModLoader_Disabled\<ModFolder>\` (same drive, outside `Paks`, so the game ignores them)
 - App data: `%LOCALAPPDATA%\DungeonsModLoader\` (`settings.json`, `manifest.json`, `profiles\`, `cache\`, `downloads\`, `logs\`, `backups\`)
+
+## Mods installed by hand
+
+Anything placed in `~mods` outside the app is picked up automatically: on every start, before launching the game,
+and (while the app runs) a couple of seconds after the folder changes. A folder becomes a local mod with its files
+recorded in `manifest.json`; loose `Name_P.pak/.ucas/.utoc` files lying directly in `~mods` are moved into a
+`~mods\Name\` folder first so they can be enabled and disabled. Nothing is deleted. A folder that cannot be read
+yet (still copying, files in use) shows up as "Unmanaged" and is added as soon as it can be read.
+
+## Profiles
+
+A profile is a named set of enabled mods, stored as `profiles\<name>.json`. The active profile always mirrors the
+Installed page: every toggle, install and uninstall updates it. Activating another profile (Profiles page, or the
+dropdown on the Installed page) enables its mods and disables all others by moving folders; if a move fails the
+moves already made are undone and the previous profile stays active. New profiles start with the mods enabled at
+that moment. Export writes a small shareable `.json` (mod names + Nexus ids); Import creates a new profile from
+such a file and lists the mods that are not installed on this PC.
 
 ## Installing mods from files
 
