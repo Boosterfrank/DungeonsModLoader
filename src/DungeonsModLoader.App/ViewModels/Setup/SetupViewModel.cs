@@ -3,19 +3,24 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DungeonsModLoader.App.Services;
+using DungeonsModLoader.App.ViewModels.Pages;
 using DungeonsModLoader.Core;
 using DungeonsModLoader.Core.Game;
 using DungeonsModLoader.Core.Mods;
 using DungeonsModLoader.Core.Permissions;
 using DungeonsModLoader.Core.Settings;
+using DungeonsModLoader.Nexus;
+using DungeonsModLoader.Nexus.Api;
+using DungeonsModLoader.Nexus.Auth;
 using Microsoft.Extensions.Logging;
 
 namespace DungeonsModLoader.App.ViewModels.Setup;
 
 /// <summary>
 /// First-run setup wizard: 1. find the game, 2. show the mods already in <c>~mods</c> (added automatically),
-/// 3. done. The window shows this modally; <see cref="CloseRequested"/> carries the dialog result (true = finished,
-/// false = cancelled; the app cannot run without a game folder, so cancelling closes the app).
+/// 3. optional Nexus Mods account, 4. done. The window shows this modally; <see cref="CloseRequested"/> carries
+/// the dialog result (true = finished, false = cancelled; the app cannot run without a game folder, so cancelling
+/// closes the app).
 /// </summary>
 public sealed partial class SetupViewModel : ObservableObject, IDisposable
 {
@@ -25,6 +30,8 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     private readonly IModService _mods;
     private readonly IPermissionFixer _permissions;
     private readonly IDialogService _dialogs;
+    private readonly INexusSession _nexus;
+    private readonly IUrlOpener _urls;
     private readonly AppPaths _paths;
     private readonly ILogger<SetupViewModel> _logger;
     private readonly CancellationTokenSource _lifetime = new();
@@ -38,6 +45,8 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         IModService mods,
         IPermissionFixer permissions,
         IDialogService dialogs,
+        INexusSession nexus,
+        IUrlOpener urls,
         AppPaths paths,
         ILogger<SetupViewModel> logger)
     {
@@ -47,6 +56,8 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         _mods = mods;
         _permissions = permissions;
         _dialogs = dialogs;
+        _nexus = nexus;
+        _urls = urls;
         _paths = paths;
         _logger = logger;
 
@@ -54,9 +65,11 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         [
             new SetupStepItem(SetupStep.GameFolder, "Game folder"),
             new SetupStepItem(SetupStep.ExistingMods, "Existing mods"),
+            new SetupStepItem(SetupStep.Nexus, "Nexus Mods"),
             new SetupStepItem(SetupStep.Done, "Done"),
         ];
         UpdateStepStates(CurrentStep);
+        _nexusUserName = _nexus.User?.Name;
 
         Candidates.CollectionChanged += (_, _) => OnPropertyChanged(nameof(NothingFound));
     }
@@ -74,7 +87,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     public ObservableCollection<ExistingModViewModel> ExistingMods { get; } = new();
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsGameFolderStep), nameof(IsExistingModsStep), nameof(IsDoneStep))]
+    [NotifyPropertyChangedFor(nameof(IsGameFolderStep), nameof(IsExistingModsStep), nameof(IsNexusStep), nameof(IsDoneStep))]
     [NotifyPropertyChangedFor(nameof(StepTitle), nameof(StepDescription), nameof(NextText), nameof(ShowBack), nameof(ShowCancel))]
     [NotifyCanExecuteChangedFor(nameof(NextCommand), nameof(BackCommand))]
     private SetupStep _currentStep = SetupStep.GameFolder;
@@ -85,9 +98,9 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(NextCommand), nameof(BrowseCommand))]
     private bool _isSearching;
 
-    /// <summary>True while a Next / Finish action is doing file work; navigation is locked meanwhile.</summary>
+    /// <summary>True while a Next / Finish action is doing file or network work; navigation is locked meanwhile.</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(NextCommand), nameof(BackCommand), nameof(CancelCommand), nameof(BrowseCommand))]
+    [NotifyCanExecuteChangedFor(nameof(NextCommand), nameof(BackCommand), nameof(CancelCommand), nameof(BrowseCommand), nameof(LoginWithSsoCommand))]
     private bool _isBusy;
 
     [ObservableProperty]
@@ -101,7 +114,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(NextCommand))]
     private InstallCandidateViewModel? _selectedCandidate;
 
-    /// <summary>The installation applied when leaving step 1 (shown in the summary on step 3).</summary>
+    /// <summary>The installation applied when leaving step 1 (shown in the summary on the last step).</summary>
     [ObservableProperty]
     private InstallCandidateViewModel? _appliedInstallation;
 
@@ -119,6 +132,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
 
     public bool IsGameFolderStep => CurrentStep == SetupStep.GameFolder;
     public bool IsExistingModsStep => CurrentStep == SetupStep.ExistingMods;
+    public bool IsNexusStep => CurrentStep == SetupStep.Nexus;
     public bool IsDoneStep => CurrentStep == SetupStep.Done;
 
     public bool ShowBack => CurrentStep != SetupStep.GameFolder;
@@ -131,6 +145,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     {
         SetupStep.GameFolder => "Find your game",
         SetupStep.ExistingMods => "Existing mods",
+        SetupStep.Nexus => "Nexus Mods account",
         _ => "All set",
     };
 
@@ -138,10 +153,17 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     {
         SetupStep.GameFolder => $"We'll look for {AppInfo.GameDisplayName} on this PC. Pick the install you want to manage mods for.",
         SetupStep.ExistingMods => "Mods that were already in ~mods have been added to your list automatically. Nothing was moved or deleted.",
+        SetupStep.Nexus => "Optional: connect your Nexus Mods account to download mods from the Browse page and get update notices. You can skip this and add the key later in Settings.",
         _ => $"{AppInfo.DisplayName} is ready. Here's what was set up.",
     };
 
-    public string NextText => CurrentStep == SetupStep.Done ? "Finish" : "Next";
+    public string NextText => CurrentStep switch
+    {
+        SetupStep.Done => "Finish",
+        SetupStep.Nexus when !IsNexusConnected && ApiKeyInput.Trim().Length > 0 => "Verify & continue",
+        SetupStep.Nexus when !IsNexusConnected => "Skip for now",
+        _ => "Next",
+    };
 
     public string FoundSummary => FoundCount switch
     {
@@ -243,6 +265,21 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
                 break;
 
             case SetupStep.ExistingMods:
+                NexusUserName = _nexus.User?.Name;
+                CurrentStep = SetupStep.Nexus;
+                break;
+
+            case SetupStep.Nexus:
+                if (!IsNexusConnected && ApiKeyInput.Trim().Length > 0 && !await ConnectNexusAsync())
+                {
+                    return;
+                }
+
+                if (!IsNexusConnected)
+                {
+                    _logger.LogInformation("Nexus Mods step skipped during setup");
+                }
+
                 CurrentStep = SetupStep.Done;
                 break;
 
@@ -263,9 +300,13 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
                 CurrentStep = SetupStep.GameFolder;
                 break;
 
-            case SetupStep.Done:
+            case SetupStep.Nexus:
                 LoadExistingMods();
                 CurrentStep = SetupStep.ExistingMods;
+                break;
+
+            case SetupStep.Done:
+                CurrentStep = SetupStep.Nexus;
                 break;
         }
     }
@@ -481,7 +522,108 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     }
 
     // ------------------------------------------------------------------------------------------------------
-    // Step 3: finish
+    // Step 3: Nexus Mods account (optional)
+    // ------------------------------------------------------------------------------------------------------
+
+    public string NexusKeyInfo => SettingsViewModel.NexusKeyInfo;
+
+    public bool IsSsoAvailable => NexusConstants.IsSsoAvailable;
+
+    /// <summary>The pasted personal key (bridged from the PasswordBox by the window; never logged).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NextText))]
+    private string _apiKeyInput = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsNexusConnected), nameof(NexusSummary), nameof(NextText))]
+    private string? _nexusUserName;
+
+    [ObservableProperty]
+    private string? _nexusError;
+
+    public bool IsNexusConnected => !string.IsNullOrEmpty(NexusUserName);
+
+    /// <summary>Line on the last step.</summary>
+    public string NexusSummary => IsNexusConnected
+        ? $"Nexus Mods: connected as {NexusUserName}{(_nexus.IsPremium ? " (Premium)" : string.Empty)}"
+        : "Nexus Mods: not connected. Add your key any time in Settings; browsing works without it.";
+
+    [RelayCommand]
+    private void OpenApiKeyPage() => _urls.OpenUrl(NexusConstants.ApiKeyPageUrl);
+
+    private bool CanLoginWithSso() => !IsBusy && IsSsoAvailable;
+
+    [RelayCommand(CanExecute = nameof(CanLoginWithSso))]
+    private async Task LoginWithSsoAsync()
+    {
+        var provider = _nexus.Providers.FirstOrDefault(p => p.Method == NexusAuthMethod.Sso);
+        if (provider is null)
+        {
+            return;
+        }
+
+        NexusError = null;
+        IsBusy = true;
+        BusyText = "Waiting for your approval in the browser…";
+        try
+        {
+            var user = await _dialogs.RunWithProgressAsync(
+                "Log in with Nexus Mods",
+                (progress, cancellationToken) => _nexus.LoginAsync(provider, null, new Progress<string>(m => progress.Report(new ProgressUpdate(m))), cancellationToken));
+            NexusUserName = user.Name;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (NexusException ex)
+        {
+            NexusError = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            BusyText = null;
+        }
+    }
+
+    /// <summary>Validates and stores the pasted key; a problem is shown inline and keeps the user on the step.</summary>
+    private async Task<bool> ConnectNexusAsync()
+    {
+        var provider = _nexus.Providers.FirstOrDefault(p => p.Method == NexusAuthMethod.PersonalApiKey);
+        if (provider is null)
+        {
+            return true;
+        }
+
+        NexusError = null;
+        IsBusy = true;
+        BusyText = "Checking the key with Nexus Mods…";
+        try
+        {
+            var user = await _nexus.LoginAsync(provider, ApiKeyInput, cancellationToken: _lifetime.Token);
+            NexusUserName = user.Name;
+            ApiKeyInput = string.Empty;
+            _logger.LogInformation("Nexus Mods account connected during setup");
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (NexusException ex)
+        {
+            NexusError = ex.Message;
+            return false;
+        }
+        finally
+        {
+            IsBusy = false;
+            BusyText = null;
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------
+    // Step 4: finish
     // ------------------------------------------------------------------------------------------------------
 
     private async Task FinishAsync()
@@ -492,8 +634,8 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         {
             _settings.Current.FirstRunCompleted = true;
             await _settings.SaveAsync(_lifetime.Token);
-            _logger.LogInformation("First-run setup completed for {Root} ({Source}); {Found} existing mod(s)",
-                _settings.Current.GameRootPath, _settings.Current.GameSource, FoundCount);
+            _logger.LogInformation("First-run setup completed for {Root} ({Source}); {Found} existing mod(s); Nexus connected: {Nexus}",
+                _settings.Current.GameRootPath, _settings.Current.GameSource, FoundCount, IsNexusConnected);
             RequestClose(true);
         }
         catch (OperationCanceledException)

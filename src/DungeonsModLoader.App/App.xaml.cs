@@ -10,9 +10,12 @@ using DungeonsModLoader.App.Views.Setup;
 using DungeonsModLoader.Core;
 using DungeonsModLoader.Core.Game;
 using DungeonsModLoader.Core.Mods;
-using DungeonsModLoader.Core.Permissions;
 using DungeonsModLoader.Core.Profiles;
 using DungeonsModLoader.Core.Settings;
+using DungeonsModLoader.Nexus;
+using DungeonsModLoader.Nexus.Auth;
+using DungeonsModLoader.Nexus.Nxm;
+using DungeonsModLoader.Nexus.Updates;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -41,6 +44,7 @@ public partial class App : Application
     // Static Serilog access is confined to this file; everything else takes ILogger<T> via DI.
     private Serilog.ILogger _log = Serilog.Core.Logger.None;
     private AppPaths? _paths;
+    private Mutex? _instanceMutex;
     private bool _mainWindowShown;
     private bool _crashDialogOpen;
 
@@ -66,11 +70,24 @@ public partial class App : Application
         paths.EnsureCreated();
         _paths = paths;
 
+        // One instance per data folder: a second launch (the browser opening an nxm:// link) hands its arguments
+        // to the running copy and quits.
+        _instanceMutex = SingleInstance.TryAcquire(paths.Root, e.Args, out var forwarded);
+        if (_instanceMutex is null)
+        {
+            if (!forwarded)
+            {
+                ShowAlreadyRunningDialog();
+            }
+
+            Shutdown(0);
+            return;
+        }
+
         Log.Logger = CreateLogger(paths);
         _log = Log.ForContext<App>();
 
-        // Milestone 5: nxm:// links arrive as arguments and carry a per-user download token ("key=");
-        // mask that query value here before the arguments are written to the log.
+        // nxm:// links carry a per-user download token ("key="); it is masked before the arguments hit the log.
         _log.Information(
             "{App} {Version} starting | {OS} ({Arch:l}) | {Runtime} | pid {Pid} | data folder {DataFolder} | args {Args}",
             AppInfo.DisplayName,
@@ -80,7 +97,7 @@ public partial class App : Application
             RuntimeInformation.FrameworkDescription,
             Environment.ProcessId,
             paths.Root,
-            e.Args);
+            SecretMasker.Mask(e.Args));
 
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
@@ -108,6 +125,9 @@ public partial class App : Application
             return;
         }
 
+        // The stored Nexus key (if any) is restored before the wizard so its Nexus step knows the account.
+        await RestoreNexusAsync(_host.Services);
+
         if (!await PrepareGameAsync(_host.Services))
         {
             _log.Information("First-run setup was cancelled; closing the app");
@@ -120,23 +140,11 @@ public partial class App : Application
 
         // From here on, folders dropped into ~mods by hand are picked up while the app runs.
         _host.Services.GetRequiredService<IModFolderWatcher>().Start();
-    }
 
-    /// <summary>
-    /// Loads the profiles (creating "Default" on the first run) once the mod store is ready. A failure here is
-    /// logged and does not stop the app: the Profiles page simply starts empty and the active profile is not
-    /// tracked until the next start.
-    /// </summary>
-    private async Task PrepareProfilesAsync(IServiceProvider services)
-    {
-        try
-        {
-            await services.GetRequiredService<IProfileService>().InitializeAsync();
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _log.Error(ex, "Profiles could not be loaded");
-        }
+        // Later launches (nxm:// links from the browser) arrive here.
+        _host.Services.GetRequiredService<ISingleInstanceServer>().Start(args => Dispatcher.InvokeAsync(() => HandleArgumentsAsync(args)).Task.Unwrap());
+
+        _ = StartNexusBackgroundAsync(_host.Services, e.Args);
     }
 
     /// <summary>
@@ -171,6 +179,104 @@ public partial class App : Application
         return true;
     }
 
+    /// <summary>
+    /// Loads the profiles (creating "Default" on the first run) once the mod store is ready. A failure here is
+    /// logged and does not stop the app: the Profiles page simply starts empty and the active profile is not
+    /// tracked until the next start.
+    /// </summary>
+    private async Task PrepareProfilesAsync(IServiceProvider services)
+    {
+        try
+        {
+            await services.GetRequiredService<IProfileService>().InitializeAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.Error(ex, "Profiles could not be loaded");
+        }
+    }
+
+    /// <summary>Loads the stored Nexus API key and checks it with Nexus (network problems keep the key, unverified).</summary>
+    private async Task RestoreNexusAsync(IServiceProvider services)
+    {
+        try
+        {
+            await services.GetRequiredService<INexusSession>().RestoreAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.Error(ex, "The Nexus Mods session could not be restored");
+        }
+    }
+
+    /// <summary>After the main window is up: the throttled update check, then any nxm:// links from the command line.</summary>
+    private async Task StartNexusBackgroundAsync(IServiceProvider services, string[] args)
+    {
+        try
+        {
+            var found = await services.GetRequiredService<IModUpdateChecker>().CheckAsync();
+            if (found.Count > 0)
+            {
+                _log.Information("Startup update check: {Count} update(s) available", found.Count);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Offline, rate limited, key rejected: the Installed page can retry; nothing to show at startup.
+            _log.Warning("Startup update check skipped: {Message}", ex.Message);
+        }
+
+        await HandleArgumentsAsync(args);
+    }
+
+    /// <summary>Acts on command-line arguments (startup or forwarded from a later launch): nxm:// links are installed.</summary>
+    private async Task HandleArgumentsAsync(IReadOnlyList<string> args)
+    {
+        if (_host is null || !_mainWindowShown)
+        {
+            return;
+        }
+
+        var links = args.Where(NxmLink.IsNxmUri).ToList();
+        if (links.Count == 0)
+        {
+            return;
+        }
+
+        BringMainWindowToFront();
+        var coordinator = _host.Services.GetRequiredService<IInstallCoordinator>();
+        var dialogs = _host.Services.GetRequiredService<IDialogService>();
+        foreach (var text in links)
+        {
+            if (NxmLink.TryParse(text, out var link) && link is not null)
+            {
+                await coordinator.HandleNxmLinkAsync(link);
+            }
+            else
+            {
+                _log.Information("Unsupported nxm link {Link}", SecretMasker.Mask(text));
+                await dialogs.ShowInfoAsync("Link not supported", "This Nexus Mods link is not a mod file download (for example a collection), so the app cannot open it.");
+            }
+        }
+    }
+
+    private void BringMainWindowToFront()
+    {
+        if (MainWindow is not { } window)
+        {
+            return;
+        }
+
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
+
+        window.Activate();
+        window.Topmost = true;
+        window.Topmost = false;
+    }
+
     private void ShowMainWindow(Window window)
     {
         MainWindow = window;
@@ -180,11 +286,33 @@ public partial class App : Application
         _log.Debug("Main window shown: {Window}", window.GetType().Name);
     }
 
+    private static void ShowAlreadyRunningDialog()
+    {
+        try
+        {
+            var dialog = new MessageDialog();
+            dialog.Present(new MessageDialogOptions
+            {
+                Kind = MessageDialogKind.Info,
+                Title = $"{AppInfo.DisplayName} is already running",
+                Message = "Another copy of the app is open but did not answer. Close it (or end it in Task Manager) and try again.",
+            });
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            dialog.ShowInTaskbar = true;
+            dialog.ShowDialog();
+        }
+        catch (Exception)
+        {
+            // Nothing sensible left to do; the process ends right after this.
+        }
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         StopHost();
         _log.Information("{App} shut down (exit code {ExitCode})", AppInfo.DisplayName, e.ApplicationExitCode);
         Log.CloseAndFlush();
+        _instanceMutex?.Dispose();
         base.OnExit(e);
     }
 
@@ -210,8 +338,8 @@ public partial class App : Application
         const long tenMegabytes = 10L * 1024 * 1024;
         const string template = "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
 
-        // Secrets policy: nothing that reaches a log call may contain an API key or download token.
-        // Milestone 5 adds a masking helper for Nexus keys next to the Nexus client; use it before logging.
+        // Secrets policy: nothing that reaches a log call may contain an API key or download token; the Nexus
+        // layer masks link tokens with SecretMasker and never logs the key itself.
         return new LoggerConfiguration()
             .MinimumLevel.Debug()
             .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)

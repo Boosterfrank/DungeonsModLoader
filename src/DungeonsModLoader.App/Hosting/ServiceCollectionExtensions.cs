@@ -5,21 +5,20 @@ using DungeonsModLoader.App.Views;
 using DungeonsModLoader.App.Views.Dialogs;
 using DungeonsModLoader.Core;
 using DungeonsModLoader.Core.DependencyInjection;
+using DungeonsModLoader.Nexus.Auth;
+using DungeonsModLoader.Nexus.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 namespace DungeonsModLoader.App.Hosting;
 
-/// <summary>
-/// Every DI registration of the app, grouped by layer. Later milestones add their services to the matching
-/// method here (settings store, manifest, game detection, install pipeline, Nexus client, ...).
-/// </summary>
+/// <summary>Every DI registration of the app, grouped by layer.</summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Name of the shared <see cref="HttpClient"/>: <c>IHttpClientFactory.CreateClient(HttpClientName)</c>.
-    /// It carries the app's User-Agent by default.
+    /// It carries the app's User-Agent by default (GitHub release checks and the like; Nexus has its own clients).
     /// </summary>
     public const string HttpClientName = AppInfo.DisplayName;
 
@@ -27,16 +26,21 @@ public static class ServiceCollectionExtensions
     public static string UserAgent { get; } =
         $"{AppInfo.DisplayName}/{AppInfo.Version} (+https://github.com/{AppInfo.GitHubRepository})";
 
-    /// <summary>Infrastructure and application services (paths, window service, HTTP).</summary>
+    /// <summary>Infrastructure and application services (paths, window service, HTTP, Nexus).</summary>
     public static IServiceCollection AddAppServices(this IServiceCollection services, AppPaths paths)
     {
         services.AddSingleton(paths);
-        services.AddSingleton<IWindowService, WindowService>();
+        services.AddSingleton<WindowService>();
+        services.AddSingleton<IWindowService>(provider => provider.GetRequiredService<WindowService>());
+        services.AddSingleton<IUrlOpener>(provider => provider.GetRequiredService<WindowService>());
+        services.AddSingleton<INxmProtocolRegistration, NxmProtocolRegistration>();
+        services.AddSingleton<ISingleInstanceServer, SingleInstanceServer>();
 
         services
             .AddCoreInfrastructure()
             .AddCoreGame()
             .AddCoreMods()
+            .AddNexus()
             .AddSetupFeature()
             .AddInstalledFeature();
 

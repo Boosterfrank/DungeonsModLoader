@@ -12,7 +12,7 @@ namespace DungeonsModLoader.App.Services;
 /// Default <see cref="IWindowService"/>: secondary windows come from DI; URLs and folders are handed to the shell.
 /// Nothing here throws at the caller: shell failures are logged and swallowed.
 /// </summary>
-public sealed class WindowService : IWindowService
+public sealed class WindowService : IWindowService, Nexus.Auth.IUrlOpener
 {
     private readonly IServiceProvider _services;
     private readonly ILogger<WindowService> _logger;

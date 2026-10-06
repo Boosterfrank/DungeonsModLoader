@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -6,13 +7,20 @@ using DungeonsModLoader.App.ViewModels.Setup;
 using DungeonsModLoader.Core;
 using DungeonsModLoader.Core.Game;
 using DungeonsModLoader.Core.Settings;
+using DungeonsModLoader.Nexus;
+using DungeonsModLoader.Nexus.Api;
+using DungeonsModLoader.Nexus.Auth;
 using Microsoft.Extensions.Logging;
 
 namespace DungeonsModLoader.App.ViewModels.Pages;
 
-/// <summary>Settings page: the game folder card (re-detect / browse) and the About card.</summary>
+/// <summary>Settings page: game folder, Nexus Mods account, nxm:// handler, About.</summary>
 public sealed partial class SettingsViewModel : PageViewModel
 {
+    /// <summary>Spec text shown next to the key field.</summary>
+    public const string NexusKeyInfo =
+        "Your key is stored encrypted on this PC only and is never uploaded anywhere except to Nexus Mods itself. Don't share your key with anyone.";
+
     private static readonly TimeSpan ConfirmationDuration = TimeSpan.FromSeconds(5);
 
     private readonly IWindowService _windows;
@@ -22,8 +30,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     private readonly IGameLocator _locator;
     private readonly IDialogService _dialogs;
     private readonly IModStoreInitializer _initializer;
+    private readonly INexusSession _nexus;
+    private readonly INxmProtocolRegistration _nxm;
     private readonly ILogger<SettingsViewModel> _logger;
     private int _confirmationVersion;
+    private int _nexusConfirmationVersion;
+    private bool _syncingNxm;
 
     public SettingsViewModel(
         IWindowService windows,
@@ -33,6 +45,8 @@ public sealed partial class SettingsViewModel : PageViewModel
         IGameLocator locator,
         IDialogService dialogs,
         IModStoreInitializer initializer,
+        INexusSession nexus,
+        INxmProtocolRegistration nxm,
         ILogger<SettingsViewModel> logger)
     {
         _windows = windows;
@@ -42,10 +56,15 @@ public sealed partial class SettingsViewModel : PageViewModel
         _locator = locator;
         _dialogs = dialogs;
         _initializer = initializer;
+        _nexus = nexus;
+        _nxm = nxm;
         _logger = logger;
 
         RefreshGame();
+        RefreshNexus();
+        RefreshNxmHandler();
         _gameContext.Changed += OnGameContextChanged;
+        _nexus.Changed += (_, _) => OnUiThread(RefreshNexus);
     }
 
     public override string Title => "Settings";
@@ -234,18 +253,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         GameSource = current?.Source ?? GameSource.Manual;
     }
 
-    private void OnGameContextChanged(object? sender, EventArgs e)
-    {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            RefreshGame();
-        }
-        else
-        {
-            dispatcher.InvokeAsync(RefreshGame);
-        }
-    }
+    private void OnGameContextChanged(object? sender, EventArgs e) => OnUiThread(RefreshGame);
 
     private async Task ShowConfirmationAsync(string text)
     {
@@ -256,6 +264,279 @@ public sealed partial class SettingsViewModel : PageViewModel
         {
             GameConfirmation = null;
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------------
+    // Nexus Mods account
+    // ------------------------------------------------------------------------------------------------------
+
+    public string NexusKeyInfoText => NexusKeyInfo;
+
+    /// <summary>True in builds where Nexus has issued the app slug: "Log in with Nexus" is offered and the key field moves behind "Advanced".</summary>
+    public bool IsSsoAvailable => NexusConstants.IsSsoAvailable;
+
+    public bool ShowKeyFieldDirectly => !IsSsoAvailable;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsNexusLoggedIn), nameof(IsNexusLoggedOut), nameof(IsNexusUnverified), nameof(IsNexusVerifying), nameof(NexusStatusText), nameof(ShowNexusAccount))]
+    [NotifyCanExecuteChangedFor(nameof(LoginWithKeyCommand), nameof(LoginWithSsoCommand), nameof(LogoutNexusCommand), nameof(RevalidateNexusCommand))]
+    private NexusSessionStatus _nexusStatus;
+
+    [ObservableProperty]
+    private string _nexusUserName = string.Empty;
+
+    [ObservableProperty]
+    private bool _nexusIsPremium;
+
+    [ObservableProperty]
+    private string _nexusMembership = string.Empty;
+
+    /// <summary>The key typed by the user (cleared after a successful login; never logged).</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(LoginWithKeyCommand))]
+    private string _apiKeyInput = string.Empty;
+
+    [ObservableProperty]
+    private bool _showApiKey;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(LoginWithKeyCommand), nameof(LoginWithSsoCommand), nameof(LogoutNexusCommand), nameof(RevalidateNexusCommand))]
+    private bool _isNexusBusy;
+
+    [ObservableProperty]
+    private string? _nexusBusyText;
+
+    /// <summary>Inline error under the key field; null hides it.</summary>
+    [ObservableProperty]
+    private string? _nexusError;
+
+    [ObservableProperty]
+    private string? _nexusConfirmation;
+
+    public bool IsNexusLoggedIn => NexusStatus == NexusSessionStatus.LoggedIn;
+
+    public bool IsNexusLoggedOut => NexusStatus == NexusSessionStatus.LoggedOut;
+
+    public bool IsNexusUnverified => NexusStatus == NexusSessionStatus.Unverified;
+
+    public bool IsNexusVerifying => NexusStatus == NexusSessionStatus.Verifying;
+
+    /// <summary>The account block (name, membership, log out) shows for a stored key, verified or not.</summary>
+    public bool ShowNexusAccount => NexusStatus is NexusSessionStatus.LoggedIn or NexusSessionStatus.Unverified;
+
+    public string NexusStatusText => NexusStatus switch
+    {
+        NexusSessionStatus.LoggedIn => "Connected",
+        NexusSessionStatus.Unverified => "Key stored, not verified (Nexus Mods could not be reached)",
+        NexusSessionStatus.Verifying => "Checking...",
+        _ => "Not connected",
+    };
+
+    private bool CanLoginWithKey() => !IsNexusBusy && !string.IsNullOrWhiteSpace(ApiKeyInput);
+
+    /// <summary>"Verify & save": checks the pasted key with Nexus and stores it encrypted.</summary>
+    [RelayCommand(CanExecute = nameof(CanLoginWithKey))]
+    private async Task LoginWithKeyAsync()
+    {
+        var provider = _nexus.Providers.FirstOrDefault(p => p.Method == NexusAuthMethod.PersonalApiKey);
+        if (provider is null)
+        {
+            return;
+        }
+
+        await RunNexusAsync("Checking the key with Nexus Mods...", async () =>
+        {
+            var user = await _nexus.LoginAsync(provider, ApiKeyInput);
+            ApiKeyInput = string.Empty;
+            ShowApiKey = false;
+            _ = ShowNexusConfirmationAsync($"Connected as {user.Name}.");
+        });
+    }
+
+    private bool CanLoginWithSso() => !IsNexusBusy && IsSsoAvailable;
+
+    /// <summary>"Log in with Nexus": browser approval over the SSO websocket (only when the app slug is set).</summary>
+    [RelayCommand(CanExecute = nameof(CanLoginWithSso))]
+    private async Task LoginWithSsoAsync()
+    {
+        var provider = _nexus.Providers.FirstOrDefault(p => p.Method == NexusAuthMethod.Sso);
+        if (provider is null)
+        {
+            return;
+        }
+
+        await RunNexusAsync("Waiting for your approval in the browser...", async () =>
+        {
+            var user = await _dialogs.RunWithProgressAsync(
+                "Log in with Nexus Mods",
+                (progress, cancellationToken) => _nexus.LoginAsync(provider, null, new Progress<string>(m => progress.Report(new ProgressUpdate(m))), cancellationToken));
+            _ = ShowNexusConfirmationAsync($"Connected as {user.Name}.");
+        });
+    }
+
+    private bool CanLogoutNexus() => !IsNexusBusy && _nexus.HasApiKey;
+
+    [RelayCommand(CanExecute = nameof(CanLogoutNexus))]
+    private async Task LogoutNexusAsync()
+    {
+        var confirmed = await _dialogs.ConfirmAsync(
+            "Log out of Nexus Mods?",
+            "The stored API key is removed from this PC. Installed mods stay as they are; downloads and update checks need a key again.",
+            "Log out");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await RunNexusAsync("Removing the key...", async () =>
+        {
+            await _nexus.LogoutAsync();
+            _ = ShowNexusConfirmationAsync("Logged out. The key was removed.");
+        });
+    }
+
+    private bool CanRevalidateNexus() => !IsNexusBusy && _nexus.HasApiKey;
+
+    [RelayCommand(CanExecute = nameof(CanRevalidateNexus))]
+    private Task RevalidateNexusAsync() =>
+        RunNexusAsync("Checking the key with Nexus Mods...", async () =>
+        {
+            var user = await _nexus.RevalidateAsync();
+            if (user is not null)
+            {
+                _ = ShowNexusConfirmationAsync($"Verified: connected as {user.Name}.");
+            }
+            else if (_nexus.LastError is { } error)
+            {
+                NexusError = error;
+            }
+        });
+
+    [RelayCommand]
+    private void OpenApiKeyPage() => _windows.OpenUrl(NexusConstants.ApiKeyPageUrl);
+
+    [RelayCommand]
+    private void OpenNexusGamePage() => _windows.OpenUrl($"{NexusConstants.WebsiteBaseUrl}/games/{NexusConstants.GameDomain}");
+
+    private async Task RunNexusAsync(string busyText, Func<Task> work)
+    {
+        if (IsNexusBusy)
+        {
+            return;
+        }
+
+        NexusError = null;
+        NexusBusyText = busyText;
+        IsNexusBusy = true;
+        try
+        {
+            await work();
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Nexus account action cancelled: {Action}", busyText);
+        }
+        catch (NexusException ex)
+        {
+            // Phrased for the user by the Nexus layer ("That does not look like a key", "rejected", "offline").
+            _logger.LogWarning("Nexus account action failed: {Message}", ex.Message);
+            NexusError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Nexus account action failed unexpectedly: {Action}", busyText);
+            NexusError = "Something went wrong. See the log for details.";
+        }
+        finally
+        {
+            IsNexusBusy = false;
+            NexusBusyText = null;
+            RefreshNexus();
+        }
+    }
+
+    private void RefreshNexus()
+    {
+        NexusStatus = _nexus.Status;
+        NexusUserName = _nexus.User?.Name ?? string.Empty;
+        NexusIsPremium = _nexus.IsPremium;
+        NexusMembership = _nexus.User is null ? string.Empty : _nexus.IsPremium ? "Premium member" : "Free account";
+        if (NexusError is null && _nexus.Status == NexusSessionStatus.Unverified && _nexus.LastError is { } error)
+        {
+            NexusError = error;
+        }
+
+        LogoutNexusCommand.NotifyCanExecuteChanged();
+        RevalidateNexusCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task ShowNexusConfirmationAsync(string text)
+    {
+        var version = ++_nexusConfirmationVersion;
+        NexusConfirmation = text;
+        await Task.Delay(ConfirmationDuration);
+        if (version == _nexusConfirmationVersion)
+        {
+            NexusConfirmation = null;
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------
+    // nxm:// handler
+    // ------------------------------------------------------------------------------------------------------
+
+    /// <summary>Bound to the toggle; changing it registers / unregisters the handler right away.</summary>
+    [ObservableProperty]
+    private bool _isNxmHandler;
+
+    [ObservableProperty]
+    private string _nxmHandlerHint = string.Empty;
+
+    partial void OnIsNxmHandlerChanged(bool value)
+    {
+        if (_syncingNxm)
+        {
+            return;
+        }
+
+        try
+        {
+            if (value)
+            {
+                _nxm.Register();
+            }
+            else
+            {
+                _nxm.Unregister();
+            }
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException or InvalidOperationException)
+        {
+            _logger.LogError(ex, "Changing the nxm:// handler registration failed");
+            _ = _dialogs.ShowErrorAsync("Could not change the link handler", "Windows did not allow the change to the nxm:// registration. See the log for details.", ex.ToString());
+        }
+
+        RefreshNxmHandler();
+    }
+
+    private void RefreshNxmHandler()
+    {
+        var state = _nxm.GetState();
+        _syncingNxm = true;
+        try
+        {
+            IsNxmHandler = state.IsThisApp;
+        }
+        finally
+        {
+            _syncingNxm = false;
+        }
+
+        NxmHandlerHint = state.IsThisApp
+            ? "\"Mod Manager Download\" buttons on Nexus Mods open in this app."
+            : state.IsOtherApp
+                ? "Another program currently handles nxm:// links. Turning this on takes them over for your account."
+                : "Lets the \"Mod Manager Download\" buttons on Nexus Mods send files to this app (free accounts download this way).";
     }
 
     // ------------------------------------------------------------------------------------------------------
@@ -270,4 +551,17 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     [RelayCommand]
     private void OpenDataFolder() => _windows.OpenFolder(_paths.Root);
+
+    private static void OnUiThread(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            action();
+        }
+        else
+        {
+            dispatcher.InvokeAsync(action);
+        }
+    }
 }

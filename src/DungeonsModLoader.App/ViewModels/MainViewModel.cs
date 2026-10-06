@@ -67,6 +67,7 @@ public sealed partial class MainViewModel : ObservableObject
         _game.Changed += OnGameChanged;
         _monitor.GameRunningChanged += OnGameRunningChanged;
         _installs.Installed += OnModInstalled;
+        _installs.Updated += OnModUpdated;
         ApplyGameContext();
     }
 
@@ -242,6 +243,8 @@ public sealed partial class MainViewModel : ObservableObject
     private void OnGameRunningChanged(object? sender, bool running) => OnUiThread(() => IsGameRunning = running);
 
     private void OnModInstalled(object? sender, ModEntry entry) => OnUiThread(() => SetStatus($"Installed {entry.DisplayName}", autoClear: true));
+
+    private void OnModUpdated(object? sender, ModEntry entry) => OnUiThread(() => SetStatus($"Updated {entry.DisplayName}{(string.IsNullOrWhiteSpace(entry.Version) ? string.Empty : " to v" + entry.Version)}", autoClear: true));
 
     private void ApplyGameContext()
     {

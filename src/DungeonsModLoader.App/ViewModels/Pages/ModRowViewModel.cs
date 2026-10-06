@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using DungeonsModLoader.Core.Mods;
+using DungeonsModLoader.Nexus.Updates;
 
 namespace DungeonsModLoader.App.ViewModels.Pages;
 
@@ -104,6 +105,26 @@ public sealed partial class ModRowViewModel : ObservableObject
     [ObservableProperty]
     private long? _nexusModId;
 
+    /// <summary>Nexus thumbnail URL from the manifest (null for local mods).</summary>
+    [ObservableProperty]
+    private string? _thumbnailUrl;
+
+    /// <summary>Local file of the thumbnail once cached; null shows the placeholder crate.</summary>
+    [ObservableProperty]
+    private string? _thumbnailPath;
+
+    /// <summary>The update checker found a newer file on Nexus.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdateText))]
+    private bool _hasUpdate;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdateText))]
+    private string? _updateVersion;
+
+    /// <summary>"Update to 1.2" for the badge.</summary>
+    public string UpdateText => HasUpdate ? (string.IsNullOrWhiteSpace(UpdateVersion) ? "Update available" : $"Update to {UpdateVersion}") : string.Empty;
+
     /// <summary>True while this row's own move is in flight (its toggle is disabled).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
@@ -178,6 +199,7 @@ public sealed partial class ModRowViewModel : ObservableObject
         IsLocal = !IsNexus;
         SourceLabel = IsNexus ? "Nexus" : "Local";
         NexusModId = entry.NexusModId;
+        ThumbnailUrl = string.IsNullOrWhiteSpace(entry.ThumbnailUrl) ? null : entry.ThumbnailUrl;
         IsMissing = info.IsMissing;
         IsUnmanaged = false;
         FolderPath = info.FolderPath;
@@ -187,6 +209,13 @@ public sealed partial class ModRowViewModel : ObservableObject
         {
             SetEnabledSilently(info.IsEnabled);
         }
+    }
+
+    /// <summary>Applies the update checker's verdict for this mod.</summary>
+    public void RefreshUpdate(NexusModUpdate? update)
+    {
+        HasUpdate = update is not null;
+        UpdateVersion = update?.NewVersion;
     }
 
     /// <summary>Sets <see cref="IsEnabled"/> without asking the page to move anything.</summary>

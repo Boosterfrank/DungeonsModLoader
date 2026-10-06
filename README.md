@@ -63,6 +63,28 @@ moves already made are undone and the previous profile stays active. New profile
 that moment. Export writes a small shareable `.json` (mod names + Nexus ids); Import creates a new profile from
 such a file and lists the mods that are not installed on this PC.
 
+## Nexus Mods
+
+The Browse page lists Trending / Latest added / Recently updated mods and searches Nexus Mods for the game
+(`minecraftdungeons2`). Browsing works **without an account** through the public GraphQL API; downloads and update
+checks need your personal API key:
+
+1. Open the Nexus Mods [API Access](https://www.nexusmods.com/users/myaccount?tab=api%20access) page and create a
+   personal key.
+2. Paste it on the Settings page ("Verify & save") or during first-run setup. The key is stored DPAPI-encrypted for
+   your Windows account in `%LOCALAPPDATA%\DungeonsModLoader\nexus-apikey.bin`, is only ever sent to
+   `api.nexusmods.com`, and is masked in the log.
+3. **Premium** members download inside the app. **Free** accounts click "Mod Manager Download" on the Nexus website;
+   with the "Handle nxm:// links" switch on (Settings), that button opens the download in the app (the app is
+   single-instance: a second launch forwards the link to the running one).
+
+Once the app is registered with Nexus Mods (`NexusConstants.AppSlug`), "Log in with Nexus" appears and the key
+field moves behind "Advanced". Updates: on startup (at most once an hour) and on demand, installed Nexus mods are
+compared with the mod's file list (author "newer version of" chains, then the newest main file); "Update" replaces
+the folder in place, keeps the name, enabled state and profile membership, and keeps the last two versions in
+`backups\`. API responses and thumbnails are cached under `cache\` with short lifetimes; rate-limit headers are
+honoured.
+
 ## Installing mods from files
 
 Drop a `.zip`, `.7z` or `.rar` archive (or loose `.pak`/`.ucas`/`.utoc` files, or a folder) onto the window, or use

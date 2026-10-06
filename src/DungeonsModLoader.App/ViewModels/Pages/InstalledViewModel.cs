@@ -10,6 +10,9 @@ using DungeonsModLoader.Core.Mods;
 using DungeonsModLoader.Core.Permissions;
 using DungeonsModLoader.Core.Profiles;
 using DungeonsModLoader.Nexus;
+using DungeonsModLoader.Nexus.Api;
+using DungeonsModLoader.Nexus.Auth;
+using DungeonsModLoader.Nexus.Updates;
 using Microsoft.Extensions.Logging;
 
 namespace DungeonsModLoader.App.ViewModels.Pages;
@@ -20,16 +23,14 @@ public enum ModFilter
     All = 0,
     Enabled = 1,
     Disabled = 2,
-
-    /// <summary>Empty until the Nexus update check arrives (milestone 5); the chip exists so the layout is final.</summary>
     UpdatesAvailable = 3,
 }
 
 /// <summary>
-/// Installed page: the mod list with enable/disable, install from file, the profile dropdown, rename and
-/// uninstall. Rows mirror <see cref="IModService.Mods"/> + <see cref="IModService.UnmanagedFolders"/> and are
-/// updated in place (matched by id / folder name) whenever the service reports a change, so toggles never jump.
-/// Every mod-changing action is locked while the game is running or a long operation is in progress.
+/// Installed page: the mod list with enable/disable, install from file, the profile dropdown, Nexus updates,
+/// rename and uninstall. Rows mirror <see cref="IModService.Mods"/> + <see cref="IModService.UnmanagedFolders"/>
+/// and are updated in place (matched by id / folder name) whenever the service reports a change, so toggles
+/// never jump. Every mod-changing action is locked while the game is running or a long operation is in progress.
 /// </summary>
 public sealed partial class InstalledViewModel : PageViewModel
 {
@@ -49,6 +50,9 @@ public sealed partial class InstalledViewModel : PageViewModel
     private readonly IModStoreInitializer _initializer;
     private readonly IInstallCoordinator _installs;
     private readonly IWindowService _windows;
+    private readonly IThumbnailCache _thumbnails;
+    private readonly IModUpdateChecker _updates;
+    private readonly INexusSession _session;
     private readonly ILogger<InstalledViewModel> _logger;
 
     /// <summary>Every known row by <see cref="ModRowViewModel.Key"/>, so refreshes reuse instances.</summary>
@@ -68,6 +72,9 @@ public sealed partial class InstalledViewModel : PageViewModel
         IModStoreInitializer initializer,
         IInstallCoordinator installs,
         IWindowService windows,
+        IThumbnailCache thumbnails,
+        IModUpdateChecker updates,
+        INexusSession session,
         ILogger<InstalledViewModel> logger)
     {
         _mods = mods;
@@ -79,14 +86,20 @@ public sealed partial class InstalledViewModel : PageViewModel
         _initializer = initializer;
         _installs = installs;
         _windows = windows;
+        _thumbnails = thumbnails;
+        _updates = updates;
+        _session = session;
         _logger = logger;
 
         _isGameRunning = _monitor.IsGameRunning;
         _activeProfile = _profiles.ActiveProfileName;
+        _hasNexusKey = _session.HasApiKey;
 
         _mods.Changed += OnModsChanged;
         _monitor.GameRunningChanged += OnGameRunningChanged;
         _profiles.Changed += OnProfilesChanged;
+        _updates.Changed += (_, _) => OnUiThread(RefreshUpdates);
+        _session.Changed += (_, _) => OnUiThread(() => HasNexusKey = _session.HasApiKey);
 
         // The services may already be initialized (or not; then their Changed events fill the lists later).
         RebuildRows();
@@ -309,6 +322,10 @@ public sealed partial class InstalledViewModel : PageViewModel
     [NotifyCanExecuteChangedFor(nameof(RenameCommand))]
     [NotifyCanExecuteChangedFor(nameof(UninstallCommand))]
     [NotifyCanExecuteChangedFor(nameof(RemoveMissingCommand))]
+    [NotifyCanExecuteChangedFor(nameof(UpdateCommand))]
+    [NotifyCanExecuteChangedFor(nameof(UpdateAllCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CheckForUpdatesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CheckForUpdateCommand))]
     private bool _isGameRunning;
 
     /// <summary>A long operation (bulk enable/disable, install, import, uninstall) is running; the list is locked meanwhile.</summary>
@@ -321,6 +338,10 @@ public sealed partial class InstalledViewModel : PageViewModel
     [NotifyCanExecuteChangedFor(nameof(RenameCommand))]
     [NotifyCanExecuteChangedFor(nameof(UninstallCommand))]
     [NotifyCanExecuteChangedFor(nameof(RemoveMissingCommand))]
+    [NotifyCanExecuteChangedFor(nameof(UpdateCommand))]
+    [NotifyCanExecuteChangedFor(nameof(UpdateAllCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CheckForUpdatesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CheckForUpdateCommand))]
     private bool _isBusy;
 
     [ObservableProperty]
@@ -332,6 +353,156 @@ public sealed partial class InstalledViewModel : PageViewModel
     partial void OnIsGameRunningChanged(bool value) => UpdateRowLocks();
 
     partial void OnIsBusyChanged(bool value) => UpdateRowLocks();
+
+    // ----------------------------------------------------------------------------------------------------------
+    // Nexus updates
+    // ----------------------------------------------------------------------------------------------------------
+
+    /// <summary>A Nexus API key is stored, so update checks and downloads are possible.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CheckForUpdatesCommand), nameof(CheckForUpdateCommand), nameof(UpdateCommand), nameof(UpdateAllCommand))]
+    private bool _hasNexusKey;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUpdates), nameof(UpdateAllText))]
+    [NotifyCanExecuteChangedFor(nameof(UpdateAllCommand))]
+    private int _updatesCount;
+
+    public bool HasUpdates => UpdatesCount > 0;
+
+    public string UpdateAllText => UpdatesCount == 1 ? "Update 1 mod" : $"Update all ({UpdatesCount})";
+
+    private bool CanCheckForUpdates() => CanMutate && HasNexusKey;
+
+    /// <summary>"Check for updates": asks Nexus about every installed Nexus mod now (ignores the hourly throttle).</summary>
+    [RelayCommand(CanExecute = nameof(CanCheckForUpdates))]
+    private Task CheckForUpdatesAsync() =>
+        RunBusyAsync("Checking Nexus Mods for updates...", async () =>
+        {
+            try
+            {
+                var found = await _updates.CheckAsync(force: true);
+                var nexusMods = Rows.Count(r => r.IsNexus);
+                if (nexusMods == 0)
+                {
+                    await _dialogs.ShowInfoAsync("No Nexus mods", "None of your mods came from Nexus Mods, so there is nothing to check. Mods installed from the Browse page are checked automatically.");
+                }
+                else if (found.Count == 0)
+                {
+                    await _dialogs.ShowInfoAsync("Up to date", nexusMods == 1 ? "Your Nexus mod is up to date." : $"All {nexusMods} Nexus mods are up to date.");
+                }
+                else
+                {
+                    var names = string.Join(Environment.NewLine, found.Select(u => $"• {_mods.Find(u.ModId)?.Entry.DisplayName ?? "?"} → {u.NewVersion}"));
+                    await _dialogs.ShowInfoAsync(found.Count == 1 ? "1 update available" : $"{found.Count} updates available", names);
+                }
+            }
+            catch (NexusException ex)
+            {
+                _logger.LogWarning("Update check failed: {Message}", ex.Message);
+                await _dialogs.ShowErrorAsync("Could not check for updates", ex.Message, ex.ToString());
+            }
+        });
+
+    private bool CanCheckForUpdate(ModRowViewModel? row) => CanMutate && HasNexusKey && row is { IsNexus: true, IsMissing: false };
+
+    /// <summary>Context menu "Check for update" for one Nexus mod.</summary>
+    [RelayCommand(CanExecute = nameof(CanCheckForUpdate))]
+    private async Task CheckForUpdateAsync(ModRowViewModel? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        NexusModUpdate? update = null;
+        var checkedOk = false;
+        await RunBusyAsync($"Checking {row.DisplayName} on Nexus Mods...", async () =>
+        {
+            try
+            {
+                update = await _updates.CheckModAsync(row.Id);
+                checkedOk = true;
+            }
+            catch (Exception ex) when (ex is NexusException or ModNotFoundException)
+            {
+                _logger.LogWarning("Update check for {Mod} failed: {Message}", row.DisplayName, ex.Message);
+                await _dialogs.ShowErrorAsync($"Could not check {row.DisplayName}", ex.Message, ex.ToString());
+            }
+        });
+
+        if (!checkedOk)
+        {
+            return;
+        }
+
+        if (update is null)
+        {
+            await _dialogs.ShowInfoAsync("Up to date", $"'{row.DisplayName}' is up to date{(row.Version is null ? string.Empty : $" (v{row.Version})")}.");
+            return;
+        }
+
+        var now = await _dialogs.ConfirmAsync(
+            "Update available",
+            $"'{row.DisplayName}' can be updated{(row.Version is null ? string.Empty : $" from v{row.Version}")} to {update.NewVersion}. Update now?",
+            "Update now");
+        if (now)
+        {
+            await UpdateAsync(row);
+        }
+    }
+
+    private bool CanUpdate(ModRowViewModel? row) => CanMutate && HasNexusKey && row is { HasUpdate: true };
+
+    /// <summary>Downloads the newer file and replaces the mod in place (name, state and profiles are kept).</summary>
+    [RelayCommand(CanExecute = nameof(CanUpdate))]
+    private async Task UpdateAsync(ModRowViewModel? row)
+    {
+        if (row is null || !_updates.Updates.TryGetValue(row.Id, out var update) || !await EnsureCanMutateAsync())
+        {
+            return;
+        }
+
+        await RunBusyAsync($"Updating {row.DisplayName}...", async () =>
+        {
+            var entry = await _installs.UpdateFromNexusAsync(update);
+            _logger.LogInformation("Update of {Mod} from the Installed page: {Outcome}", row.DisplayName, entry is null ? "not completed" : "done");
+        });
+    }
+
+    private bool CanUpdateAll() => CanMutate && HasNexusKey && UpdatesCount > 0;
+
+    [RelayCommand(CanExecute = nameof(CanUpdateAll))]
+    private async Task UpdateAllAsync()
+    {
+        var pending = _updates.Updates.Values.ToList();
+        if (pending.Count == 0 || !await EnsureCanMutateAsync())
+        {
+            return;
+        }
+
+        await RunBusyAsync("Updating mods...", async () =>
+        {
+            var done = await _installs.UpdateAllFromNexusAsync(pending);
+            _logger.LogInformation("Update all from the Installed page: {Done} of {Total}", done, pending.Count);
+            if (done < pending.Count)
+            {
+                await _dialogs.ShowInfoAsync("Updates finished", $"{done} of {pending.Count} mods were updated. The others were skipped or could not be updated; see the log for details.");
+            }
+        });
+    }
+
+    private void RefreshUpdates()
+    {
+        foreach (var row in Rows)
+        {
+            row.RefreshUpdate(row.IsManaged && _updates.Updates.TryGetValue(row.Id, out var update) ? update : null);
+        }
+
+        UpdatesCount = Rows.Count(r => r.HasUpdate);
+        UpdateCommand.NotifyCanExecuteChanged();
+        ApplyFilter();
+    }
 
     // ----------------------------------------------------------------------------------------------------------
     // Commands
@@ -503,14 +674,6 @@ public sealed partial class InstalledViewModel : PageViewModel
     }
 
     private bool CanOpenOnNexus(ModRowViewModel? row) => row is { IsNexus: true, NexusModId: not null };
-
-    /// <summary>Placeholder until the Nexus update check (milestone 5); never executable.</summary>
-    [RelayCommand(CanExecute = nameof(CanCheckForUpdate))]
-    private void CheckForUpdate(ModRowViewModel? row)
-    {
-    }
-
-    private bool CanCheckForUpdate(ModRowViewModel? row) => false;
 
     /// <summary>
     /// Moves one mod between <c>~mods</c> and the disabled folder. Called by the row when its switch is flipped;
@@ -715,6 +878,12 @@ public sealed partial class InstalledViewModel : PageViewModel
                 _rowsByKey[key] = row;
             }
 
+            row.RefreshUpdate(_updates.Updates.TryGetValue(info.Entry.Id, out var update) ? update : null);
+            if (row.ThumbnailUrl is not null && row.ThumbnailPath is null)
+            {
+                _ = LoadThumbnailAsync(row);
+            }
+
             desired.Add(row);
             seen.Add(key);
         }
@@ -745,7 +914,24 @@ public sealed partial class InstalledViewModel : PageViewModel
 
         SyncCollection(Rows, desired);
         UpdateCounts();
+        UpdatesCount = Rows.Count(r => r.HasUpdate);
         ApplyFilter();
+    }
+
+    private async Task LoadThumbnailAsync(ModRowViewModel row)
+    {
+        try
+        {
+            var path = await _thumbnails.GetFileAsync(row.ThumbnailUrl);
+            if (path is not null)
+            {
+                OnUiThread(() => row.ThumbnailPath = path);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Thumbnail for {Mod} failed", row.DisplayName);
+        }
     }
 
     private void UpdateCounts()
@@ -770,7 +956,7 @@ public sealed partial class InstalledViewModel : PageViewModel
     {
         ModFilter.Enabled => row.IsUnmanaged || (row.IsEnabled && !row.IsMissing),
         ModFilter.Disabled => row.IsManaged && (!row.IsEnabled || row.IsMissing),
-        ModFilter.UpdatesAvailable => false,
+        ModFilter.UpdatesAvailable => row.HasUpdate,
         _ => true,
     };
 

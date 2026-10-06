@@ -60,8 +60,31 @@
         <MenuItem Header="Check for update"
                   Command="{Binding CheckForUpdateCommand}"
                   CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                  ToolTip="Available after Nexus Mods integration"
-                  ToolTipService.ShowOnDisabled="True" />
+                  ToolTip="Asks Nexus Mods whether a newer file exists (Nexus mods, with your API key)"
+                  ToolTipService.ShowOnDisabled="True">
+          <MenuItem.Style>
+            <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding PlacementTarget.DataContext.IsNexus, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Value="False">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </MenuItem.Style>
+        </MenuItem>
+        <MenuItem Header="Update"
+                  Command="{Binding UpdateCommand}"
+                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+          <MenuItem.Style>
+            <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding PlacementTarget.DataContext.HasUpdate, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Value="False">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </MenuItem.Style>
+        </MenuItem>
         <MenuItem Header="Rename display name..."
                   Command="{Binding RenameCommand}"
                   CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
@@ -103,20 +126,21 @@
               <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <!-- Thumbnail placeholder (milestone 5 swaps in the Nexus image). -->
-            <Border Grid.Column="0"
-                    Width="48" Height="48"
-                    Background="{StaticResource Brush.Bg.Input}"
-                    BorderBrush="{StaticResource Brush.Border}"
-                    BorderThickness="{StaticResource Thickness.Border.Thin}"
-                    CornerRadius="{StaticResource Radius.Small}"
-                    VerticalAlignment="Center">
-              <Path Data="{StaticResource Icon.Pak}"
-                    Width="22" Height="22"
-                    Stretch="Uniform"
-                    Fill="{StaticResource Brush.Text.Muted}"
-                    SnapsToDevicePixels="True" />
-            </Border>
+            <!-- Thumbnail: the Nexus image once cached, otherwise the placeholder crate. -->
+            <Grid Grid.Column="0" Width="48" Height="48" VerticalAlignment="Center">
+              <Border Background="{StaticResource Brush.Bg.Input}"
+                      BorderBrush="{StaticResource Brush.Border}"
+                      BorderThickness="{StaticResource Thickness.Border.Thin}"
+                      CornerRadius="{StaticResource Radius.Small}">
+                <Path Data="{StaticResource Icon.Pak}"
+                      Width="22" Height="22"
+                      Stretch="Uniform"
+                      Fill="{StaticResource Brush.Text.Muted}"
+                      SnapsToDevicePixels="True" />
+              </Border>
+              <Border CornerRadius="{StaticResource Radius.Small}"
+                      Background="{Binding ThumbnailPath, Converter={StaticResource Converter.FileToImageBrush}, ConverterParameter=96}" />
+            </Grid>
 
             <StackPanel Grid.Column="1" Margin="14,0,14,0" VerticalAlignment="Center">
               <Grid HorizontalAlignment="Left">
@@ -145,17 +169,37 @@
                           Visibility="{Binding IsUnmanaged, Converter={StaticResource Converter.BoolToVisibility}}">
                     <TextBlock Text="Unmanaged" />
                   </Border>
+                  <Border Style="{DynamicResource Badge.Accent}" Margin="0,0,6,0"
+                          Visibility="{Binding HasUpdate, Converter={StaticResource Converter.BoolToVisibility}}">
+                    <TextBlock Text="{Binding UpdateText}" />
+                  </Border>
                 </StackPanel>
               </Grid>
               <TextBlock Style="{StaticResource Text.Small}" Text="{Binding Subtitle}" Margin="0,3,0,0" />
             </StackPanel>
 
             <Grid Grid.Column="2" VerticalAlignment="Center" Margin="8,0,4,0">
-              <ToggleButton Style="{DynamicResource ToggleSwitch}"
-                            IsChecked="{Binding IsEnabled, Mode=TwoWay}"
-                            IsEnabled="{Binding CanToggle}"
-                            Visibility="{Binding ShowToggle, Converter={StaticResource Converter.BoolToVisibility}}"
-                            AutomationProperties.Name="{Binding DisplayName, StringFormat='Enable {0}'}" />
+              <StackPanel Orientation="Horizontal" Visibility="{Binding ShowToggle, Converter={StaticResource Converter.BoolToVisibility}}">
+                <Button Content="Update" Margin="0,0,14,0" VerticalAlignment="Center"
+                        Command="{Binding DataContext.UpdateCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                        CommandParameter="{Binding}"
+                        Visibility="{Binding HasUpdate, Converter={StaticResource Converter.BoolToVisibility}}"
+                        ToolTip="Download the newer file and replace this mod (name, state and profiles are kept)">
+                  <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource Button.Primary}">
+                      <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+                      <Setter Property="MinWidth" Value="0" />
+                      <Setter Property="Padding" Value="14,0" />
+                      <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+                    </Style>
+                  </Button.Style>
+                </Button>
+                <ToggleButton Style="{DynamicResource ToggleSwitch}"
+                              IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                              IsEnabled="{Binding CanToggle}"
+                              VerticalAlignment="Center"
+                              AutomationProperties.Name="{Binding DisplayName, StringFormat='Enable {0}'}" />
+              </StackPanel>
               <Button Style="{StaticResource Installed.SmallButton}"
                       Content="Import"
                       Visibility="{Binding IsUnmanaged, Converter={StaticResource Converter.BoolToVisibility}}"
@@ -330,6 +374,20 @@
         <TextBlock Grid.Column="0" Style="{StaticResource Text.Small}" Text="{Binding FooterText}" VerticalAlignment="Center" />
         <StackPanel Grid.Column="1" Orientation="Horizontal"
                     Visibility="{Binding HasAnyRows, Converter={StaticResource Converter.BoolToVisibility}}">
+          <Button Style="{StaticResource Installed.SmallGhostButton}" Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" Margin="0,0,8,0"
+                  Visibility="{Binding HasNexusKey, Converter={StaticResource Converter.BoolToVisibility}}"
+                  ToolTip="Ask Nexus Mods for newer files of your Nexus mods" />
+          <Button Content="{Binding UpdateAllText}" Command="{Binding UpdateAllCommand}" Margin="0,0,8,0"
+                  Visibility="{Binding HasUpdates, Converter={StaticResource Converter.BoolToVisibility}}">
+            <Button.Style>
+              <Style TargetType="Button" BasedOn="{StaticResource Button.Primary}">
+                <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Padding" Value="14,0" />
+                <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+              </Style>
+            </Button.Style>
+          </Button>
           <Button Style="{StaticResource Installed.SmallButton}" Content="Enable all" Command="{Binding EnableAllCommand}" Margin="0,0,8,0" />
           <Button Style="{StaticResource Installed.SmallButton}" Content="Disable all" Command="{Binding DisableAllCommand}" />
         </StackPanel>

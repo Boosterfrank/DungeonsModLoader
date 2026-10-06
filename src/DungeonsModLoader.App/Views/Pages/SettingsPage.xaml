@@ -1,13 +1,59 @@
 <UserControl x:Class="DungeonsModLoader.App.Views.Pages.SettingsPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:DungeonsModLoader.App.Controls"
              xmlns:core="clr-namespace:DungeonsModLoader.Core;assembly=DungeonsModLoader.Core">
-  <!-- DataContext: SettingsViewModel. Nexus account / nxm handler sections arrive in later milestones. -->
+  <!-- DataContext: SettingsViewModel. Cards: Game, Nexus Mods account, Nexus links, About. -->
   <UserControl.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="pack://application:,,,/Views/Shell/PageStyles.xaml" />
       </ResourceDictionary.MergedDictionaries>
+
+      <Style x:Key="Settings.Card" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Setter Property="Padding" Value="{StaticResource Padding.Card}" />
+        <Setter Property="MaxWidth" Value="620" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="Margin" Value="0,0,0,16" />
+      </Style>
+
+      <!--
+        Personal API key editor: hidden PasswordBox (bridged to the view model in code-behind, since Password is
+        not bindable) or a plain TextBox when "Show" is ticked, the "Get my key" link, "Verify & save" and the
+        spec's privacy note. Used directly, or inside the "Advanced" expander once SSO is available.
+      -->
+      <DataTemplate x:Key="Settings.ApiKeyEditor">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Text.Label}" Text="PERSONAL API KEY" Margin="0,0,0,6" />
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <PasswordBox Grid.Column="0"
+                         controls:TextBoxHelper.Placeholder="Paste your API key"
+                         Loaded="OnKeyBoxLoaded"
+                         PasswordChanged="OnKeyBoxPasswordChanged"
+                         Visibility="{Binding ShowApiKey, Converter={StaticResource Converter.BoolToVisibility.Inverse}}"
+                         AutomationProperties.Name="API key" />
+            <TextBox Grid.Column="0"
+                     controls:TextBoxHelper.Placeholder="Paste your API key"
+                     Text="{Binding ApiKeyInput, UpdateSourceTrigger=PropertyChanged}"
+                     Visibility="{Binding ShowApiKey, Converter={StaticResource Converter.BoolToVisibility}}"
+                     AutomationProperties.Name="API key (visible)" />
+            <CheckBox Grid.Column="1" Content="Show" Margin="12,0,0,0" VerticalAlignment="Center" IsChecked="{Binding ShowApiKey, Mode=TwoWay}" />
+            <Button Grid.Column="2" Style="{DynamicResource Button.Primary}" Content="Verify &amp; save" Margin="12,0,0,0" Command="{Binding LoginWithKeyCommand}" />
+          </Grid>
+          <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+            <TextBlock Style="{StaticResource Text.Small}" VerticalAlignment="Center">
+              <Hyperlink Command="{Binding OpenApiKeyPageCommand}">Get my key</Hyperlink>
+              <Run Text=" on the Nexus Mods API Access page (personal keys are for personal use and testing)." />
+            </TextBlock>
+          </StackPanel>
+          <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Muted}" Text="{Binding NexusKeyInfoText}" TextWrapping="Wrap" Margin="0,8,0,0" />
+        </StackPanel>
+      </DataTemplate>
     </ResourceDictionary>
   </UserControl.Resources>
 
@@ -19,18 +65,14 @@
 
     <StackPanel Grid.Row="0">
       <TextBlock Style="{StaticResource Text.H1}" Text="{Binding Title}" />
-      <TextBlock Style="{StaticResource Page.Subtitle}" Text="Game folder and app information. Nexus account options arrive in a later milestone." />
+      <TextBlock Style="{StaticResource Page.Subtitle}" Text="Game folder, Nexus Mods account and app information." />
     </StackPanel>
 
     <ScrollViewer Grid.Row="1" Margin="0,24,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
       <StackPanel>
 
-        <!-- Game -->
-        <Border Style="{DynamicResource Card}"
-                Padding="{StaticResource Padding.Card}"
-                MaxWidth="560"
-                HorizontalAlignment="Left"
-                Margin="0,0,0,16">
+        <!-- ============================ Game ============================ -->
+        <Border Style="{StaticResource Settings.Card}">
           <StackPanel>
             <TextBlock Style="{StaticResource Text.H2}" Text="Game" />
 
@@ -71,11 +113,108 @@
           </StackPanel>
         </Border>
 
-        <!-- About -->
-        <Border Style="{DynamicResource Card}"
-                Padding="{StaticResource Padding.Card}"
-                MaxWidth="560"
-                HorizontalAlignment="Left">
+        <!-- ============================ Nexus Mods account ============================ -->
+        <Border Style="{StaticResource Settings.Card}">
+          <StackPanel>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Style="{StaticResource Text.H2}" Text="Nexus Mods account" />
+              <Border Grid.Column="1" VerticalAlignment="Center">
+                <Border.Style>
+                  <Style TargetType="Border" BasedOn="{StaticResource Badge}">
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding IsNexusLoggedIn}" Value="True">
+                        <Setter Property="Background" Value="{StaticResource Brush.Success.Faint}" />
+                        <Setter Property="TextElement.Foreground" Value="{StaticResource Brush.Success}" />
+                      </DataTrigger>
+                      <DataTrigger Binding="{Binding IsNexusUnverified}" Value="True">
+                        <Setter Property="Background" Value="{StaticResource Brush.Warning.Faint}" />
+                        <Setter Property="TextElement.Foreground" Value="{StaticResource Brush.Warning}" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
+                <TextBlock Text="{Binding NexusStatusText}" />
+              </Border>
+            </Grid>
+
+            <!-- Connected: who, membership, actions -->
+            <StackPanel Margin="0,16,0,0" Visibility="{Binding ShowNexusAccount, Converter={StaticResource Converter.BoolToVisibility}}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Style="{StaticResource Text.Body}" FontWeight="SemiBold" Text="{Binding NexusUserName}" VerticalAlignment="Center" />
+                <Border Margin="10,0,0,0" VerticalAlignment="Center" Visibility="{Binding NexusMembership, Converter={StaticResource Converter.NullToVisibility}}">
+                  <Border.Style>
+                    <Style TargetType="Border" BasedOn="{StaticResource Badge}">
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding NexusIsPremium}" Value="True">
+                          <Setter Property="Background" Value="{StaticResource Brush.Accent.Faint}" />
+                          <Setter Property="TextElement.Foreground" Value="{StaticResource Brush.Accent.Light}" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Border.Style>
+                  <TextBlock Text="{Binding NexusMembership}" />
+                </Border>
+              </StackPanel>
+              <TextBlock Style="{StaticResource Text.Small}" Margin="0,6,0,0" TextWrapping="Wrap"
+                         Text="Premium members download inside the app. Free accounts start downloads with the &quot;Mod Manager Download&quot; button on Nexus Mods, which opens here when the link handler below is on." />
+              <WrapPanel Margin="0,14,0,-8">
+                <Button Style="{DynamicResource Button.Secondary}" Content="Verify key" Command="{Binding RevalidateNexusCommand}" Margin="0,0,8,8" />
+                <Button Style="{DynamicResource Button.Ghost}" Content="Log out / remove key" Command="{Binding LogoutNexusCommand}" Margin="0,0,8,8" />
+              </WrapPanel>
+            </StackPanel>
+
+            <!-- Not connected: SSO button (registered builds) and / or the personal key field -->
+            <StackPanel Margin="0,16,0,0" Visibility="{Binding ShowNexusAccount, Converter={StaticResource Converter.BoolToVisibility.Inverse}}">
+              <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap"
+                         Text="Connect your Nexus Mods account to download mods from the Browse page and to get update notices. Browsing works without it." />
+
+              <StackPanel Margin="0,14,0,0" Visibility="{Binding IsSsoAvailable, Converter={StaticResource Converter.BoolToVisibility}}">
+                <Button Style="{DynamicResource Button.Primary}" Content="Log in with Nexus" HorizontalAlignment="Left" Command="{Binding LoginWithSsoCommand}" />
+                <Expander Header="Advanced: use a personal API key" Margin="0,12,0,0" IsExpanded="False">
+                  <ContentControl Content="{Binding}" ContentTemplate="{DynamicResource Settings.ApiKeyEditor}" Margin="0,8,0,0" />
+                </Expander>
+              </StackPanel>
+
+              <ContentControl Content="{Binding}" ContentTemplate="{DynamicResource Settings.ApiKeyEditor}" Margin="0,14,0,0"
+                              Visibility="{Binding ShowKeyFieldDirectly, Converter={StaticResource Converter.BoolToVisibility}}" />
+            </StackPanel>
+
+            <!-- Busy / error / confirmation -->
+            <StackPanel Margin="0,12,0,0" Visibility="{Binding IsNexusBusy, Converter={StaticResource Converter.BoolToVisibility}}">
+              <TextBlock Style="{StaticResource Text.Small}" Text="{Binding NexusBusyText}" Margin="0,0,0,6" />
+              <ProgressBar IsIndeterminate="True" />
+            </StackPanel>
+            <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Danger}" Text="{Binding NexusError}" TextWrapping="Wrap" Margin="0,12,0,0"
+                       Visibility="{Binding NexusError, Converter={StaticResource Converter.NullToVisibility}}" />
+            <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Success}" Text="{Binding NexusConfirmation}" Margin="0,12,0,0"
+                       Visibility="{Binding NexusConfirmation, Converter={StaticResource Converter.NullToVisibility}}" />
+          </StackPanel>
+        </Border>
+
+        <!-- ============================ Nexus links ============================ -->
+        <Border Style="{StaticResource Settings.Card}">
+          <StackPanel>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                <TextBlock Style="{StaticResource Text.H2}" Text="Handle nxm:// links" />
+                <TextBlock Style="{StaticResource Text.Small}" Text="{Binding NxmHandlerHint}" TextWrapping="Wrap" Margin="0,6,0,0" />
+              </StackPanel>
+              <ToggleButton Grid.Column="1" Style="{DynamicResource ToggleSwitch}" VerticalAlignment="Center"
+                            IsChecked="{Binding IsNxmHandler, Mode=TwoWay}" AutomationProperties.Name="Handle nxm links" />
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <!-- ============================ About ============================ -->
+        <Border Style="{StaticResource Settings.Card}">
           <StackPanel>
             <TextBlock Style="{StaticResource Text.H2}" Text="About" />
             <TextBlock Style="{StaticResource Text.Body}" Margin="0,8,0,0">

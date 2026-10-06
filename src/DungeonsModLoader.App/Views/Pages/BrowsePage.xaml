@@ -1,22 +1,212 @@
 <UserControl x:Class="DungeonsModLoader.App.Views.Pages.BrowsePage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:core="clr-namespace:DungeonsModLoader.Core;assembly=DungeonsModLoader.Core">
-  <!-- DataContext: BrowseViewModel. Nexus Mods browsing is coming soon. -->
+             xmlns:controls="clr-namespace:DungeonsModLoader.App.Controls"
+             xmlns:vm="clr-namespace:DungeonsModLoader.App.ViewModels.Pages"
+             xmlns:core="clr-namespace:DungeonsModLoader.Core;assembly=DungeonsModLoader.Core"
+             Loaded="OnLoaded">
+  <!--
+    DataContext: BrowseViewModel.
+    Header / toolbar (list chips + search) / hint & error cards / grid of cards + detail panel / footer.
+  -->
   <UserControl.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="pack://application:,,,/Views/Shell/PageStyles.xaml" />
       </ResourceDictionary.MergedDictionaries>
+
+      <Style x:Key="Browse.Chip" TargetType="RadioButton" BasedOn="{StaticResource Chip}">
+        <Setter Property="Margin" Value="0,4,8,4" />
+      </Style>
+
+      <Style x:Key="Browse.SmallButton" TargetType="Button" BasedOn="{StaticResource Button.Secondary}">
+        <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+      </Style>
+
+      <Style x:Key="Browse.SmallPrimaryButton" TargetType="Button" BasedOn="{StaticResource Button.Primary}">
+        <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+      </Style>
+
+      <Style x:Key="Browse.SmallGhostButton" TargetType="Button" BasedOn="{StaticResource Button.Ghost}">
+        <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Secondary}" />
+      </Style>
+
+      <!-- A card is a button (keyboard reachable) drawn as a Card; the selected one gets the accent border. -->
+      <Style x:Key="Browse.Card" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Background" Value="{StaticResource Brush.Bg.Panel}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}" />
+        <Setter Property="BorderThickness" Value="{StaticResource Thickness.Border.Thin}" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0,0,12,12" />
+        <Setter Property="Width" Value="236" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <Border x:Name="Root"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="{StaticResource Radius.Medium}">
+                <ContentPresenter />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource Brush.Border.Strong}" />
+                  <Setter TargetName="Root" Property="Background" Value="{StaticResource Brush.Bg.PanelAlt}" />
+                </Trigger>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                  <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+                </DataTrigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                  <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource Brush.Cyan}" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <DataTemplate x:Key="Browse.CardTemplate" DataType="{x:Type vm:BrowseModCardViewModel}">
+        <Button Style="{StaticResource Browse.Card}"
+                Command="{Binding DataContext.SelectCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                CommandParameter="{Binding}"
+                AutomationProperties.Name="{Binding Name}">
+          <StackPanel>
+            <!-- Thumbnail (16:9), placeholder crate until the cache has the image. -->
+            <Grid Height="132" ClipToBounds="True">
+              <Border Background="{StaticResource Brush.Bg.Input}" CornerRadius="6,6,0,0" />
+              <Path Data="{StaticResource Icon.Pak}" Width="28" Height="28" Stretch="Uniform"
+                    Fill="{StaticResource Brush.Text.Muted}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              <Border CornerRadius="6,6,0,0"
+                      Background="{Binding ThumbnailPath, Converter={StaticResource Converter.FileToImageBrush}, ConverterParameter=480}" />
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,8,0">
+                <Border Style="{DynamicResource Badge.Success}" Visibility="{Binding ShowInstalledBadge, Converter={StaticResource Converter.BoolToVisibility}}">
+                  <TextBlock Text="Installed" />
+                </Border>
+                <Border Style="{DynamicResource Badge.Accent}" Visibility="{Binding HasUpdate, Converter={StaticResource Converter.BoolToVisibility}}">
+                  <TextBlock Text="Update available" />
+                </Border>
+              </StackPanel>
+            </Grid>
+            <StackPanel Margin="14,12,14,14">
+              <TextBlock Style="{StaticResource Text.H3}" Text="{Binding Name}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding Name}" />
+              <TextBlock Style="{StaticResource Text.Small}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis">
+                <Run Text="by" /><Run Text=" " /><Run Text="{Binding Author, Mode=OneWay}" />
+              </TextBlock>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Summary}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="58" Margin="0,8,0,0" LineHeight="19" LineStackingStrategy="BlockLineHeight" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding StatsText}" Margin="0,10,0,0" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </StackPanel>
+        </Button>
+      </DataTemplate>
+
+      <!-- Detail panel: one file row -->
+      <DataTemplate x:Key="Browse.FileTemplate" DataType="{x:Type vm:BrowseFileViewModel}">
+        <Border BorderBrush="{StaticResource Brush.Border.Subtle}" BorderThickness="0,0,0,1" Padding="0,10">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,12,0" VerticalAlignment="Center">
+              <TextBlock Style="{StaticResource Text.Body}" FontWeight="Medium" TextWrapping="Wrap">
+                <Run Text="{Binding Name, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Version, Mode=OneWay}" Foreground="{StaticResource Brush.Text.Secondary}" />
+              </TextBlock>
+              <TextBlock Style="{StaticResource Text.Caption}" Margin="0,2,0,0">
+                <Run Text="{Binding SizeText, Mode=OneWay}" /><Run Text="  ·  " /><Run Text="{Binding DateText, Mode=OneWay}" />
+              </TextBlock>
+              <TextBlock Style="{StaticResource Text.Small}" Text="{Binding Description}" TextWrapping="Wrap" Margin="0,4,0,0"
+                         Visibility="{Binding HasDescription, Converter={StaticResource Converter.BoolToVisibility}}" />
+            </StackPanel>
+            <!-- Nested ItemsControls: the detail view model sits on the panel's ScrollViewer, not on the nearest ItemsControl. -->
+            <Button Grid.Column="1" VerticalAlignment="Center" Content="{Binding ActionText}"
+                    Command="{Binding DataContext.InstallFileCommand, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
+                    CommandParameter="{Binding}">
+              <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource Browse.SmallButton}">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsUpdateTarget}" Value="True">
+                      <Setter Property="Background" Value="{StaticResource Brush.Accent.Gradient}" />
+                      <Setter Property="Foreground" Value="{StaticResource Brush.Text.OnAccent}" />
+                      <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent.Dark}" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Button.Style>
+            </Button>
+          </Grid>
+        </Border>
+      </DataTemplate>
+
+      <DataTemplate x:Key="Browse.FileGroupTemplate" DataType="{x:Type vm:BrowseFileGroupViewModel}">
+        <StackPanel Margin="0,0,0,14">
+          <TextBlock Style="{StaticResource Text.Label}" Text="{Binding Title}" Margin="0,0,0,2" />
+          <ItemsControl ItemsSource="{Binding Files}" ItemTemplate="{StaticResource Browse.FileTemplate}" Focusable="False" />
+        </StackPanel>
+      </DataTemplate>
+
+      <DataTemplate x:Key="Browse.RequirementTemplate" DataType="{x:Type vm:BrowseRequirementViewModel}">
+        <Grid Margin="0,0,0,8">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0" Margin="0,0,10,0">
+            <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap">
+              <Hyperlink Command="{Binding OpenRequirementCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                <Run Text="{Binding Name, Mode=OneWay}" />
+              </Hyperlink>
+            </TextBlock>
+            <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding Notes}" TextWrapping="Wrap"
+                       Visibility="{Binding HasNotes, Converter={StaticResource Converter.BoolToVisibility}}" />
+          </StackPanel>
+          <Border Grid.Column="1" VerticalAlignment="Top">
+            <Border.Style>
+              <Style TargetType="Border" BasedOn="{StaticResource Badge}">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsSatisfied}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Success.Faint}" />
+                    <Setter Property="TextElement.Foreground" Value="{StaticResource Brush.Success}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding IsWarning}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Warning.Faint}" />
+                    <Setter Property="TextElement.Foreground" Value="{StaticResource Brush.Warning}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </Border.Style>
+            <TextBlock Text="{Binding StatusText}" />
+          </Border>
+        </Grid>
+      </DataTemplate>
     </ResourceDictionary>
   </UserControl.Resources>
 
   <Grid Margin="{StaticResource Padding.Page}">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
+    <!-- ============================ Header ============================ -->
     <StackPanel Grid.Row="0">
       <TextBlock Style="{StaticResource Text.H1}" Text="{Binding Title}" />
       <TextBlock Style="{StaticResource Page.Subtitle}">
@@ -24,33 +214,180 @@
       </TextBlock>
     </StackPanel>
 
-    <!-- Empty state -->
-    <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
-      <Path Style="{StaticResource EmptyState.Icon}" Data="{StaticResource Icon.Browse}" />
-      <TextBlock Style="{StaticResource EmptyState.Headline}" Text="Nexus Mods browsing is coming soon" />
+    <!-- ============================ Toolbar ============================ -->
+    <Grid Grid.Row="1" Margin="0,20,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <WrapPanel Grid.Column="0" VerticalAlignment="Top">
+        <RadioButton Style="{StaticResource Browse.Chip}" GroupName="BrowseTab" Content="Trending" IsChecked="{Binding IsTrendingTab, Mode=TwoWay}" />
+        <RadioButton Style="{StaticResource Browse.Chip}" GroupName="BrowseTab" Content="Latest added" IsChecked="{Binding IsLatestTab, Mode=TwoWay}" />
+        <RadioButton Style="{StaticResource Browse.Chip}" GroupName="BrowseTab" Content="Recently updated" IsChecked="{Binding IsUpdatedTab, Mode=TwoWay}" />
+        <RadioButton Style="{StaticResource Browse.Chip}" GroupName="BrowseTab" Content="{Binding TabTitle}" IsChecked="{Binding IsSearchTab, Mode=OneWay}"
+                     Visibility="{Binding IsSearchTab, Converter={StaticResource Converter.BoolToVisibility}}" />
+      </WrapPanel>
+      <TextBox Grid.Column="1"
+               Style="{DynamicResource TextBox.Search}"
+               Width="260"
+               VerticalAlignment="Top"
+               Margin="16,0,0,0"
+               controls:TextBoxHelper.Placeholder="Search Nexus Mods..."
+               Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+               AutomationProperties.Name="Search Nexus Mods">
+        <TextBox.InputBindings>
+          <KeyBinding Key="Return" Command="{Binding SearchCommand}" />
+        </TextBox.InputBindings>
+      </TextBox>
+      <Button Grid.Column="2" Style="{StaticResource Browse.SmallGhostButton}" Content="Refresh" VerticalAlignment="Top" Margin="8,4,0,0"
+              Command="{Binding RefreshCommand}" ToolTip="Fetch the list again from Nexus Mods" />
+    </Grid>
 
-      <!-- Disabled search box look (static; the real TextBox.Search comes with the Browse feature). -->
-      <Border Width="320"
-              Height="{StaticResource Size.Control.Height}"
-              Background="{StaticResource Brush.Bg.Input}"
-              BorderBrush="{StaticResource Brush.Border}"
-              BorderThickness="{StaticResource Thickness.Border.Thin}"
-              CornerRadius="{StaticResource Radius.Medium}"
-              Opacity="0.6"
-              HorizontalAlignment="Center">
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0">
-          <Path Data="{StaticResource Icon.Search}"
-                Width="14" Height="14"
-                Stretch="Uniform"
-                Fill="{StaticResource Brush.Text.Muted}"
-                VerticalAlignment="Center" />
-          <TextBlock Style="{StaticResource Text.Secondary}"
-                     Foreground="{StaticResource Brush.Text.Muted}"
-                     Text="Search Nexus Mods…"
-                     VerticalAlignment="Center"
-                     Margin="10,0,0,0" />
-        </StackPanel>
+    <!-- ============================ Hints ============================ -->
+    <StackPanel Grid.Row="2">
+      <Border Style="{DynamicResource Card}" Background="{StaticResource Brush.Cyan.Faint}" Padding="12,10" Margin="0,16,0,0"
+              Visibility="{Binding ShowLoginHint, Converter={StaticResource Converter.BoolToVisibility}}">
+        <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap"
+                   Text="You are browsing without a Nexus Mods account. Downloads need your API key: add it on the Settings page whenever you like." />
       </Border>
+      <Border Style="{DynamicResource Card}" Background="{StaticResource Brush.Danger.Faint}" Padding="12,10" Margin="0,16,0,0"
+              Visibility="{Binding ErrorText, Converter={StaticResource Converter.NullToVisibility}}">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Style="{StaticResource Text.Body}" Text="{Binding ErrorText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Style="{StaticResource Browse.SmallButton}" Content="Try again" Command="{Binding RefreshCommand}" Margin="12,0,0,0" VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+    </StackPanel>
+
+    <!-- ============================ Grid + detail ============================ -->
+    <Grid Grid.Row="3" Margin="0,16,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <Grid Grid.Column="0">
+        <ScrollViewer x:Name="CardsScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="OnCardsScrollChanged">
+          <StackPanel>
+            <ItemsControl ItemsSource="{Binding Cards}" ItemTemplate="{StaticResource Browse.CardTemplate}" Focusable="False">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+            <Button Style="{StaticResource Browse.SmallButton}" Content="Load more" HorizontalAlignment="Center" Margin="0,8,0,16"
+                    Command="{Binding LoadMoreCommand}"
+                    Visibility="{Binding HasMore, Converter={StaticResource Converter.BoolToVisibility}}" />
+            <StackPanel Margin="0,8,0,16" HorizontalAlignment="Center" Visibility="{Binding IsLoadingMore, Converter={StaticResource Converter.BoolToVisibility}}">
+              <ProgressBar Width="160" IsIndeterminate="True" />
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- First load -->
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="260"
+                    Visibility="{Binding IsLoading, Converter={StaticResource Converter.BoolToVisibility}}">
+          <TextBlock Style="{StaticResource Text.Secondary}" Text="Loading from Nexus Mods..." TextAlignment="Center" Margin="0,0,0,10" />
+          <ProgressBar IsIndeterminate="True" />
+        </StackPanel>
+
+        <!-- Nothing found -->
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420"
+                    Visibility="{Binding ShowEmpty, Converter={StaticResource Converter.BoolToVisibility}}">
+          <Path Style="{StaticResource EmptyState.Icon}" Data="{StaticResource Icon.Browse}" />
+          <TextBlock Style="{StaticResource EmptyState.Headline}" Text="No mods found" Margin="0,0,0,8" />
+          <TextBlock Style="{StaticResource Text.Secondary}" Text="Try another search, or open the game's page on Nexus Mods." TextAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,16" />
+          <Button Style="{DynamicResource Button.Secondary}" Content="Open Nexus Mods" HorizontalAlignment="Center" Command="{Binding OpenNexusGamePageCommand}" />
+        </StackPanel>
+      </Grid>
+
+      <!-- Detail panel. The outer grid owns the visibility (page view model); the card binds to the selected mod. -->
+      <Grid Grid.Column="1" Visibility="{Binding HasSelection, Converter={StaticResource Converter.BoolToVisibility}}">
+      <Border Width="420" Margin="16,0,0,0"
+              Style="{DynamicResource Card}" Padding="0"
+              DataContext="{Binding Selected}">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+
+          <!-- Picture + close -->
+          <Grid Grid.Row="0" Height="180" ClipToBounds="True">
+            <Border Background="{StaticResource Brush.Bg.Input}" CornerRadius="6,6,0,0" />
+            <Path Data="{StaticResource Icon.Pak}" Width="36" Height="36" Stretch="Uniform" Fill="{StaticResource Brush.Text.Muted}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Border CornerRadius="6,6,0,0" Background="{Binding PicturePath, Converter={StaticResource Converter.FileToImageBrush}, ConverterParameter=840}" />
+            <Button Style="{DynamicResource Button.Icon}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,8,0" Width="28" Height="28"
+                    Command="{Binding DataContext.CloseDetailCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                    ToolTip="Close" AutomationProperties.Name="Close details">
+              <Path Data="{StaticResource Glyph.Close}" Width="10" Height="10" Stretch="Uniform" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+            </Button>
+          </Grid>
+
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="16,14,16,16">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.H2}" Text="{Binding Name}" TextWrapping="Wrap" />
+              <TextBlock Style="{StaticResource Text.Small}" Margin="0,4,0,0" TextWrapping="Wrap">
+                <Run Text="by" /><Run Text=" " /><Run Text="{Binding Author, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding VersionText, Mode=OneWay}" />
+              </TextBlock>
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding StatsText}" Margin="0,4,0,0" TextWrapping="Wrap" />
+
+              <Border Style="{DynamicResource Badge.Success}" Margin="0,10,0,0" Visibility="{Binding ShowInstalled, Converter={StaticResource Converter.BoolToVisibility}}">
+                <TextBlock Text="{Binding InstalledText}" />
+              </Border>
+
+              <WrapPanel Margin="0,14,0,0">
+                <Button Style="{StaticResource Browse.SmallPrimaryButton}" Content="Install" Margin="0,0,8,8" Command="{Binding InstallMainCommand}"
+                        Visibility="{Binding HasMainFile, Converter={StaticResource Converter.BoolToVisibility}}" ToolTip="Install the main file" />
+                <Button Style="{StaticResource Browse.SmallButton}" Content="Open on Nexus Mods" Margin="0,0,8,8" Command="{Binding OpenOnNexusCommand}" />
+              </WrapPanel>
+
+              <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Warning}" Text="{Binding DownloadHint}" TextWrapping="Wrap" Margin="0,2,0,0"
+                         Visibility="{Binding DownloadHint, Converter={StaticResource Converter.NullToVisibility}}" />
+
+              <!-- Requirements -->
+              <StackPanel Margin="0,18,0,0" Visibility="{Binding HasRequirements, Converter={StaticResource Converter.BoolToVisibility}}">
+                <TextBlock Style="{StaticResource Text.Label}" Text="REQUIRES" Margin="0,0,0,8" />
+                <ItemsControl ItemsSource="{Binding Requirements}" ItemTemplate="{StaticResource Browse.RequirementTemplate}" Focusable="False" />
+              </StackPanel>
+
+              <!-- Files -->
+              <TextBlock Style="{StaticResource Text.Label}" Text="FILES" Margin="0,18,0,6" />
+              <ProgressBar IsIndeterminate="True" Margin="0,4,0,8" Visibility="{Binding IsLoadingFiles, Converter={StaticResource Converter.BoolToVisibility}}" />
+              <TextBlock Style="{StaticResource Text.Small}" Text="{Binding FilesError}" TextWrapping="Wrap" Foreground="{StaticResource Brush.Warning}"
+                         Visibility="{Binding FilesError, Converter={StaticResource Converter.NullToVisibility}}" />
+              <ItemsControl ItemsSource="{Binding FileGroups}" ItemTemplate="{StaticResource Browse.FileGroupTemplate}" Focusable="False" />
+
+              <!-- Description -->
+              <TextBlock Style="{StaticResource Text.Label}" Text="DESCRIPTION" Margin="0,10,0,8" />
+              <ProgressBar IsIndeterminate="True" Margin="0,4,0,8" Visibility="{Binding IsLoadingDescription, Converter={StaticResource Converter.BoolToVisibility}}" />
+              <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" controls:BbCodeText.Source="{Binding Description}" />
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+      </Grid>
+    </Grid>
+
+    <!-- ============================ Footer ============================ -->
+    <StackPanel Grid.Row="4">
+      <Separator Style="{DynamicResource Divider}" Margin="0,8,0,8" />
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Grid.Column="0" Style="{StaticResource Text.Small}" VerticalAlignment="Center">
+          <Run Text="{Binding TotalCountText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding AccountText, Mode=OneWay}" />
+        </TextBlock>
+        <TextBlock Grid.Column="1" Style="{StaticResource Text.Caption}" Text="{Binding RateLimitText}" VerticalAlignment="Center" />
+      </Grid>
     </StackPanel>
   </Grid>
 </UserControl>

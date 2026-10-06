@@ -245,13 +245,13 @@ public sealed class DialogService : IDialogService
         dialog.Complete();
     }
 
-    public Task<InstallPickerResult?> ShowInstallPickerAsync(InstallPlan plan)
+    public Task<InstallPickerResult?> ShowInstallPickerAsync(InstallPlan plan, string? suggestedName = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         return OnUiThreadAsync(() =>
         {
             var dialog = new InstallPickerDialog();
-            dialog.Present(plan);
+            dialog.Present(plan, suggestedName);
             ShowModal(dialog);
             _logger.LogDebug(
                 "Install picker for {Source} closed ({Outcome})",

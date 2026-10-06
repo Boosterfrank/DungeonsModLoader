@@ -87,6 +87,8 @@
   <conv:NullToVisibilityConverter x:Key="Converter.NullToVisibility" />
   <conv:NullToVisibilityConverter x:Key="Converter.NullToVisibility.Inverse" Invert="True" />
   <conv:InverseBoolConverter x:Key="Converter.InverseBool" />
+  <conv:FilePathToImageConverter x:Key="Converter.FileToImage" />
+  <conv:FilePathToImageConverter x:Key="Converter.FileToImageBrush" AsBrush="True" />
 
   <!-- ================================================================================================ -->
   <!-- 2. BUTTONS -->

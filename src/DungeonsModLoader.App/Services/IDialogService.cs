@@ -60,7 +60,8 @@ public interface IDialogService
 
     /// <summary>
     /// Lets the user pick the file sets to install (and edit the mod name) when a package offers a choice.
+    /// <paramref name="suggestedName"/> pre-fills the name (the Nexus mod name); null uses the archive-derived one.
     /// Returns null when cancelled.
     /// </summary>
-    Task<InstallPickerResult?> ShowInstallPickerAsync(InstallPlan plan);
+    Task<InstallPickerResult?> ShowInstallPickerAsync(InstallPlan plan, string? suggestedName = null);
 }

@@ -28,10 +28,10 @@ public partial class InstallPickerDialog : Window
     public InstallPickerResult? Result { get; private set; }
 
     /// <summary>Fills the dialog without showing it.</summary>
-    public void Present(InstallPlan plan)
+    public void Present(InstallPlan plan, string? suggestedName = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        _viewModel = new InstallPickerViewModel(plan);
+        _viewModel = new InstallPickerViewModel(plan, suggestedName);
         DataContext = _viewModel;
         Title = _viewModel.Header;
     }

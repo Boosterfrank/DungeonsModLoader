@@ -10,12 +10,12 @@ namespace DungeonsModLoader.App.ViewModels.Dialogs;
 /// </summary>
 public sealed partial class InstallPickerViewModel : ObservableObject
 {
-    public InstallPickerViewModel(InstallPlan plan)
+    public InstallPickerViewModel(InstallPlan plan, string? suggestedName = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
-        Header = $"Install {plan.Source.DisplayName}";
-        _name = plan.SuggestedName;
+        Header = $"Install {suggestedName ?? plan.Source.DisplayName}";
+        _name = string.IsNullOrWhiteSpace(suggestedName) ? plan.SuggestedName : suggestedName.Trim();
         PreserveStructure = plan.PreserveStructure;
 
         var defaults = new HashSet<ModFileSet>(plan.DefaultSelection);
