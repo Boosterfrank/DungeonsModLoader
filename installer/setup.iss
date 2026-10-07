@@ -54,8 +54,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-; Default decided in code: on when nothing (or this app) handles nxm:// links, off when another mod manager does.
-Name: "nxmhandler"; Description: "Open Nexus Mods ""Mod Manager Download"" links (nxm://) with {#MyAppName}"; GroupDescription: "Nexus Mods:"; Flags: unchecked
+; On by default (the user can untick it). Silent installs never change an existing registration (see ShouldRegisterNxm).
+Name: "nxmhandler"; Description: "Open Nexus Mods ""Mod Manager Download"" links (nxm://) with {#MyAppName}"; GroupDescription: "Nexus Mods:"
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -66,11 +66,11 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Registry]
 ; Same shape the app writes from Settings > "Handle nxm:// links". Removed on uninstall only when it still points here (see [Code]).
-Root: HKCU; Subkey: "Software\Classes\nxm"; ValueType: string; ValueName: ""; ValueData: "URL:Nexus Mods Protocol"; Tasks: nxmhandler
-Root: HKCU; Subkey: "Software\Classes\nxm"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Tasks: nxmhandler
-Root: HKCU; Subkey: "Software\Classes\nxm"; ValueType: string; ValueName: "Registered by"; ValueData: "{#MyAppName}"; Tasks: nxmhandler
-Root: HKCU; Subkey: "Software\Classes\nxm\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"; Tasks: nxmhandler
-Root: HKCU; Subkey: "Software\Classes\nxm\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Tasks: nxmhandler
+Root: HKCU; Subkey: "Software\Classes\nxm"; ValueType: string; ValueName: ""; ValueData: "URL:Nexus Mods Protocol"; Tasks: nxmhandler; Check: ShouldRegisterNxm
+Root: HKCU; Subkey: "Software\Classes\nxm"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Tasks: nxmhandler; Check: ShouldRegisterNxm
+Root: HKCU; Subkey: "Software\Classes\nxm"; ValueType: string; ValueName: "Registered by"; ValueData: "{#MyAppName}"; Tasks: nxmhandler; Check: ShouldRegisterNxm
+Root: HKCU; Subkey: "Software\Classes\nxm\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"; Tasks: nxmhandler; Check: ShouldRegisterNxm
+Root: HKCU; Subkey: "Software\Classes\nxm\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Tasks: nxmhandler; Check: ShouldRegisterNxm
 
 [Run]
 ; Also runs after a silent install, so the app's own self-update (/SILENT) brings the new version back up.
@@ -80,9 +80,6 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 [Code]
 const
   NxmCommandKey = 'Software\Classes\nxm\shell\open\command';
-
-var
-  TasksDefaulted: Boolean;
 
 // The command currently registered for nxm:// links, or '' when none.
 function CurrentNxmCommand(): String;
@@ -104,24 +101,21 @@ begin
   Result := ExpandConstant('{param:NOLAUNCH|0}') <> '1';
 end;
 
-procedure CurPageChanged(CurPageID: Integer);
+// [Registry] check for the nxm:// entries. Interactive installs follow the task tick box (on by default). Silent
+// installs (automation, the app's own self-update) only write the registration when nothing handles the links yet
+// or this install already does, so an update never takes them away from another program the user chose.
+function ShouldRegisterNxm(): Boolean;
 var
   Command: String;
 begin
-  // Silent installs (automation, the app's own self-update) never change the registration: an in-place update
-  // keeps a registration that already points to {app}, and nothing else is touched.
-  if WizardSilent then
-    Exit;
-
-  if (CurPageID = wpSelectTasks) and not TasksDefaulted then
+  if not WizardSilent then
   begin
-    TasksDefaulted := True;
-    Command := CurrentNxmCommand();
-    // Nothing registered, or this install already: pre-select. Another program (e.g. Vortex): leave it unchecked so
-    // an install never takes the links over silently; the app offers the switch itself when a download needs it.
-    if (Command = '') or NxmPointsToThisApp(Command) then
-      WizardSelectTasks('nxmhandler');
+    Result := True;
+    Exit;
   end;
+
+  Command := CurrentNxmCommand();
+  Result := (Command = '') or NxmPointsToThisApp(Command);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

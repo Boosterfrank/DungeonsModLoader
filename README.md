@@ -47,6 +47,24 @@ The installer (`installer\setup.iss`):
 - on uninstall **never touches your mods** in the game folder, removes the `nxm://` registration only if it still
   points to this install, and asks whether to delete the app data (`%LOCALAPPDATA%\DungeonsModLoader`).
 
+## Code signing
+
+The installer is not signed yet, so Windows SmartScreen shows "Windows protected your PC" on first run (users click
+*More info*, then *Run anyway*). The only way to remove that warning is an Authenticode signature from a
+certificate authority Windows trusts; `build.ps1 -Sign` already does the signing (SHA-256, timestamped) once a
+certificate is available:
+
+- **Azure Trusted Signing** (Microsoft, pay-as-you-go, individual or organisation validation): certificates with
+  SmartScreen reputation built in; signtool uses it through the Trusted Signing dlib.
+- **SignPath Foundation**: free signing for open-source projects (public repository required), through SignPath's
+  pipeline rather than a local certificate.
+- **A code-signing certificate from a CA** (DigiCert, Sectigo, GlobalSign, ...): an EV certificate removes the
+  SmartScreen warning immediately; a standard (OV) certificate removes "Unknown publisher" and earns reputation as
+  downloads accumulate. Install it (or its hardware token) on the build PC and run
+  `.\build.ps1 -Sign -CertificateThumbprint <sha1>` (or `-PfxPath file.pfx`).
+
+Self-signed certificates do not help: Windows does not trust them, so the warning stays.
+
 ## Releasing a new version
 
 1. Set `<Version>` in `Directory.Build.props` (the one place the version lives) and commit.

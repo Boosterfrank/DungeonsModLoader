@@ -61,23 +61,27 @@ public class NexusApiClientTests
     }
 
     [Fact]
-    public async Task Trending_uses_v1_with_a_key_and_maps_fields()
+    public async Task Trending_uses_graphql_even_with_a_key_so_it_can_page()
     {
-        var (client, handler, _, _) = Create((_, _) => FakeHttpHandler.Json(TrendingJson));
+        // The v1 list routes are fixed at ten entries; with a key the lists must still come from GraphQL with offsets.
+        var (client, handler, _, _) = Create((_, _) => FakeHttpHandler.Json(SearchJson));
 
-        var page = await client.GetListAsync(NexusListKind.Trending);
+        var page = await client.GetListAsync(NexusListKind.Trending, offset: 24, count: 24);
 
-        Assert.Contains("/v1/games/minecraftdungeons2/mods/trending.json", handler.Requests.Single().Request.RequestUri!.ToString());
+        var (request, body) = handler.Requests.Single();
+        Assert.Equal(NexusConstants.GraphQlUrl, request.RequestUri!.ToString());
+        using var json = JsonDocument.Parse(body!);
+        var variables = json.RootElement.GetProperty("variables");
+        Assert.Equal("DESC", variables.GetProperty("sort")[0].GetProperty("downloads").GetProperty("direction").GetString());
+        Assert.Equal(24, variables.GetProperty("offset").GetInt32());
+        Assert.Equal(24, variables.GetProperty("count").GetInt32());
         var mod = Assert.Single(page.Items);
-        Assert.Equal(5, mod.ModId);
-        Assert.Equal("Cool Mod", mod.Name);
-        Assert.Equal("Alice", mod.Author);
-        Assert.Equal(7, mod.Endorsements);
-        Assert.Equal("https://staticdelivery.nexusmods.com/mods/10391/images/thumbnails/5/5-1.png", mod.ThumbnailUrl);
-        Assert.False(page.HasMore);
+        Assert.Equal(100, mod.ModId);
+        Assert.Equal("Boosterfrank", mod.Author);
+        Assert.Equal(24, page.Offset);
 
-        // Second call is served from the cache.
-        await client.GetListAsync(NexusListKind.Trending);
+        // Second call for the same page is served from the cache.
+        await client.GetListAsync(NexusListKind.Trending, offset: 24, count: 24);
         Assert.Single(handler.Requests);
     }
 
@@ -207,11 +211,11 @@ public class NexusApiClientTests
         var (client, _, _, cache) = Create((_, _) =>
         {
             calls++;
-            return calls == 1 ? FakeHttpHandler.Json(TrendingJson) : throw new HttpRequestException("offline");
+            return calls == 1 ? FakeHttpHandler.Json(SearchJson) : throw new HttpRequestException("offline");
         });
 
         var fresh = await client.GetListAsync(NexusListKind.Trending);
-        cache.Expire("v1:list:trending");
+        cache.Expire("v2:list:Trending:0:20");
 
         var stale = await client.GetListAsync(NexusListKind.Trending);
 

@@ -17,12 +17,27 @@
     Stop after publishing (no Inno Setup needed).
 
 .PARAMETER Sign
-    Sign the published exe and the installer with signtool. Disabled by default; fill in the certificate
-    details in the "Code signing" block below before using it.
+    Sign the published exe and the installer with signtool (Authenticode, SHA-256, RFC 3161 timestamp). Off by
+    default. Needs a code-signing certificate: pass -CertificateThumbprint (certificate in the current user's
+    store, e.g. from a hardware token or Azure Trusted Signing's local client) or -PfxPath (+ -PfxPassword).
+    Without either, signtool picks the best certificate it finds (/a).
+
+.PARAMETER CertificateThumbprint
+    SHA-1 thumbprint of the certificate in the Windows certificate store.
+
+.PARAMETER PfxPath
+    A .pfx file with the certificate and private key.
+
+.PARAMETER PfxPassword
+    Password of the .pfx file (SecureString; prompted when omitted and -PfxPath is given).
+
+.PARAMETER TimestampUrl
+    RFC 3161 timestamp server (default DigiCert). Timestamps keep the signature valid after the certificate expires.
 
 .EXAMPLE
     .\build.ps1
     .\build.ps1 -SkipTests
+    .\build.ps1 -Sign -CertificateThumbprint 0123ABCD...
 #>
 [CmdletBinding()]
 param(
@@ -30,7 +45,11 @@ param(
     [string]$Runtime = "win-x64",
     [switch]$SkipTests,
     [switch]$SkipInstaller,
-    [switch]$Sign
+    [switch]$Sign,
+    [string]$CertificateThumbprint,
+    [string]$PfxPath,
+    [SecureString]$PfxPassword,
+    [string]$TimestampUrl = "http://timestamp.digicert.com"
 )
 
 $ErrorActionPreference = "Stop"
@@ -82,19 +101,45 @@ $exe = Join-Path $publishDir $exeName
 if (-not (Test-Path $exe)) { throw ("Published executable not found: " + $exe) }
 Write-Host ("Published " + $exe + " (" + [Math]::Round((Get-Item $exe).Length / 1MB, 1) + " MB)")
 
-# ---- Code signing (placeholder, disabled by default) ----
-# To enable: install a code-signing certificate, then run .\build.ps1 -Sign. Adjust the certificate selection
-# below (/a picks the best available certificate; use /sha1 <thumbprint> or /f <pfx> /p <password> instead).
-function Invoke-Sign([string]$file) {
-    $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
-    if (-not $signtool) { throw "signtool.exe was not found on PATH (it ships with the Windows SDK)." }
-    Invoke-Checked "signtool" { & $signtool.Source sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /a $file }
+# ---- Code signing (off by default) ----
+# Windows SmartScreen warns about unsigned installers ("Windows protected your PC"). Signing with a certificate
+# from a public CA removes the "Unknown publisher" line; an EV certificate (or Azure Trusted Signing) also gives
+# the file SmartScreen reputation right away, a standard (OV) one earns it over time. Options are listed in the
+# README under "Code signing". Run: .\build.ps1 -Sign -CertificateThumbprint <sha1> (or -PfxPath file.pfx).
+function Find-SignTool() {
+    $cmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+    if (Test-Path $kits) {
+        $found = Get-ChildItem $kits -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\x64\\" } | Sort-Object FullName -Descending | Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+    throw "signtool.exe was not found. It ships with the Windows SDK (Windows Kits\10\bin\<version>\x64)."
 }
+
+function Invoke-Sign([string]$file) {
+    $signtool = Find-SignTool
+    $args = @("sign", "/fd", "SHA256", "/td", "SHA256", "/tr", $TimestampUrl)
+    if ($CertificateThumbprint) {
+        $args += @("/sha1", $CertificateThumbprint)
+    } elseif ($PfxPath) {
+        if (-not $PfxPassword) { $PfxPassword = Read-Host -AsSecureString "Password for $PfxPath" }
+        $plain = [Runtime.InteropServices.Marshal]::PtrToStringUni([Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($PfxPassword))
+        $args += @("/f", $PfxPath, "/p", $plain)
+    } else {
+        $args += @("/a")
+    }
+    $args += $file
+    Invoke-Checked "signtool" { & $signtool @args }
+    Invoke-Checked "signtool verify" { & $signtool verify /pa /q $file }
+}
+
 if ($Sign) {
     Step "Signing the executable"
     Invoke-Sign $exe
 } else {
-    Write-Host "Code signing skipped (placeholder; run with -Sign once a certificate is set up)."
+    Write-Host "Code signing skipped (run with -Sign and a certificate; see the README section 'Code signing')."
 }
 
 if ($SkipInstaller) {

@@ -201,11 +201,14 @@
             <CheckBox Content="Check for updates when the app starts" IsChecked="{Binding AutoCheckAppUpdates, Mode=TwoWay}" Margin="0,2,0,0" />
 
             <Separator Style="{DynamicResource Divider}" Margin="0,16,0,0" />
-            <WrapPanel Margin="0,8,0,-8">
+            <WrapPanel Margin="0,8,0,0">
               <Button Style="{DynamicResource Button.Secondary}" Content="Open logs folder" Command="{Binding OpenLogsFolderCommand}" Margin="0,0,8,8" />
               <Button Style="{DynamicResource Button.Secondary}" Content="Open data folder" Command="{Binding OpenDataFolderCommand}" Margin="0,0,8,8" />
-              <Button Style="{DynamicResource Button.Secondary}" Content="Theme swatches" Command="{Binding OpenSwatchesCommand}" Margin="0,0,8,8" />
             </WrapPanel>
+            <!-- Design review tool, kept out of the way: a muted link instead of a button. -->
+            <TextBlock Style="{StaticResource Text.Caption}" Margin="0,4,0,0" HorizontalAlignment="Right">
+              <Hyperlink Command="{Binding OpenSwatchesCommand}" Foreground="{StaticResource Brush.Text.Muted}" ToolTip="Opens the theme swatch window (colours, typography, controls)">Theme swatches</Hyperlink>
+            </TextBlock>
           </StackPanel>
         </Border>
 

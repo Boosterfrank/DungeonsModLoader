@@ -59,43 +59,14 @@ public sealed class NexusApiClient : INexusApiClient
     // Lists & search
     // ---------------------------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Lists always go through GraphQL, with or without a key: the v1 list routes (<c>trending.json</c>,
+    /// <c>latest_added.json</c>, ...) are fixed at ten entries and cannot page, so they would hide most mods.
+    /// </summary>
     public Task<NexusModPage> GetListAsync(NexusListKind kind, int offset = 0, int count = 20, bool refresh = false, CancellationToken cancellationToken = default)
     {
         count = Math.Clamp(count, 1, 50);
         offset = Math.Max(0, offset);
-
-        if (HasApiKey)
-        {
-            if (offset > 0)
-            {
-                // The v1 lists are fixed at 10 items.
-                return Task.FromResult(new NexusModPage(Array.Empty<NexusMod>(), offset, offset));
-            }
-
-            var route = kind switch
-            {
-                NexusListKind.Trending => "trending",
-                NexusListKind.LatestAdded => "latest_added",
-                _ => "latest_updated",
-            };
-            return CachedAsync(
-                $"v1:list:{route}",
-                ListTtl,
-                refresh,
-                async ct =>
-                {
-                    var mods = await GetV1Async<List<V1ModInfo>>($"v1/games/{NexusConstants.GameDomain}/mods/{route}.json", _apiKey.ApiKey, ct).ConfigureAwait(false);
-                    var items = mods.Where(m => m is not null).Select(m => m.Map()).ToList();
-                    if (kind == NexusListKind.RecentlyUpdated)
-                    {
-                        // The route returns ascending by update time.
-                        items = items.OrderByDescending(m => m.UpdatedAt).ToList();
-                    }
-
-                    return new NexusModPage(items, items.Count, 0);
-                },
-                cancellationToken);
-        }
 
         var sort = kind switch
         {
