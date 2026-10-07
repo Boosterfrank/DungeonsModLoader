@@ -52,6 +52,7 @@ public sealed partial class BrowseViewModel : PageViewModel
     private readonly IThumbnailCache _thumbnails;
     private readonly INexusConnectPrompt _connect;
     private readonly IToastService _toasts;
+    private readonly ImagePreviewViewModel _preview;
     private readonly ILogger<BrowseViewModel> _logger;
 
     /// <summary>Detail pages opened from a detail page (requirements); Back pops them before returning to the grid.</summary>
@@ -71,6 +72,7 @@ public sealed partial class BrowseViewModel : PageViewModel
         IThumbnailCache thumbnails,
         INexusConnectPrompt connect,
         IToastService toasts,
+        ImagePreviewViewModel preview,
         ILogger<BrowseViewModel> logger)
     {
         _client = client;
@@ -82,6 +84,7 @@ public sealed partial class BrowseViewModel : PageViewModel
         _thumbnails = thumbnails;
         _connect = connect;
         _toasts = toasts;
+        _preview = preview;
         _logger = logger;
 
         _session.Changed += (_, _) => OnUiThread(RefreshAccountState);
@@ -340,7 +343,7 @@ public sealed partial class BrowseViewModel : PageViewModel
             _history.Push(current);
         }
 
-        var detail = new BrowseDetailViewModel(mod, _client, _session, _mods, _updates, _installs, _windows, _thumbnails, ShowModAsync, _logger);
+        var detail = new BrowseDetailViewModel(mod, _client, _session, _mods, _updates, _installs, _windows, _thumbnails, _preview, ShowModAsync, _logger);
         Selected = detail;
         HighlightCard(mod.ModId);
         _logger.LogDebug("Opened the detail page of mod {Mod} ({Name}); {Depth} page(s) behind it", mod.ModId, mod.Name, _history.Count);

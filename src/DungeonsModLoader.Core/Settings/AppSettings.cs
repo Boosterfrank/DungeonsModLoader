@@ -23,6 +23,12 @@ public sealed class AppSettings
     public DateTimeOffset? LastAppUpdateCheckUtc { get; set; }
 
     /// <summary>
+    /// How many times the app was started while a newer release was known. Reset to 0 when a start finds the app
+    /// up to date; past <see cref="AppUpdates.AppUpdatePolicy.FreeOutdatedLaunches"/> the update becomes mandatory.
+    /// </summary>
+    public int OutdatedLaunchCount { get; set; }
+
+    /// <summary>
     /// Rebuilds the <see cref="GameInstallation"/> from the stored fields, re-discovering the executables.
     /// Returns null when no valid game root is stored.
     /// </summary>

@@ -79,11 +79,12 @@ Self-signed certificates do not help: Windows does not trust them, so the warnin
    ```
 
 The app's **self-update** reads the latest release of `Boosterfrank/DungeonsModLoader` through the GitHub API
-(`releases/latest`) when it starts (at most once a day, can be turned off in Settings) and on demand from
-Settings > About. Drafts and pre-releases are ignored; the release's tag (`v0.2.0`) is compared with the running
-version and the attached `DungeonsModLoader-Setup-*.exe` is the download. A newer version shows a banner with
-"What's new" and "Update now": the installer is downloaded to the app's `downloads\` folder (size-checked) and run
-silently; the app closes and the installer brings the new version back up.
+(`releases/latest`) every time it starts (can be turned off in Settings) and on demand from Settings > About.
+Drafts and pre-releases are ignored; the release's tag (`v0.2.0`) is compared with the running version and the
+attached `DungeonsModLoader-Setup-*.exe` is the download. A newer version shows a banner with "What's new" and
+"Update now": the installer is downloaded to the app's `downloads\` folder (size-checked) and run silently; the app
+closes and the installer brings the new version back up. The banner is optional for two starts; from the third
+start on an outdated version the update is mandatory (a one-button notice, then the install).
 
 ## Solution layout
 
@@ -127,8 +128,10 @@ such a file and lists the mods that are not installed on this PC.
 ## Nexus Mods
 
 The Browse page lists Trending / Latest added / Recently updated mods and searches Nexus Mods for the game
-(`minecraftdungeons2`). Clicking a mod opens it as a full page (picture, Description / Files / Requirements tabs,
-Install, Open on Nexus Mods; Back or Esc returns to the list). Browsing works **without an account** through the
+(`minecraftdungeons2`), 24 per page with page navigation. Clicking a mod opens it as a full page (picture,
+Description / Images / Files / Requirements tabs, Install, Open on Nexus Mods; Back or Esc returns to the list).
+The Images tab shows the page picture and every picture embedded in the description (the website's own image
+gallery has no public API); clicking a picture opens it large in a viewer with Left / Right navigation. Browsing works **without an account** through the
 public GraphQL API; downloads and update checks need your personal API key.
 
 **Connecting the account** is one guided dialog, reachable from the Browse page, Settings, the first-run wizard, or

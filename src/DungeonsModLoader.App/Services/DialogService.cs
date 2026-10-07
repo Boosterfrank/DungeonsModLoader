@@ -46,6 +46,16 @@ public sealed class DialogService : IDialogService
             OpenLogsFolder = () => _windows.OpenFolder(_paths.LogsDirectory),
         });
 
+    public Task ShowRequiredAsync(string title, string message, string buttonText = "OK") =>
+        ShowMessageAsync(new MessageDialogOptions
+        {
+            Kind = MessageDialogKind.Info,
+            Title = title,
+            Message = message,
+            ConfirmText = buttonText,
+            AllowDismiss = false,
+        });
+
     public Task<bool> ConfirmAsync(string title, string message, string confirmText = "OK", string cancelText = "Cancel", bool isDestructive = false) =>
         ShowMessageAsync(new MessageDialogOptions
         {

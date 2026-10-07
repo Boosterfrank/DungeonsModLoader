@@ -62,6 +62,18 @@
         </Style.Triggers>
       </Style>
 
+      <!-- ============================ Picture viewer ============================ -->
+      <Geometry x:Key="Shell.Glyph.ChevronLeft">M7,0 L9,2 L3.5,7.5 L9,13 L7,15 L0,7.5 Z</Geometry>
+      <Geometry x:Key="Shell.Glyph.ChevronRight">M2,0 L0,2 L5.5,7.5 L0,13 L2,15 L9,7.5 Z</Geometry>
+
+      <Style x:Key="Shell.ViewerButton" TargetType="Button" BasedOn="{StaticResource Button.Icon}">
+        <Setter Property="Width" Value="44" />
+        <Setter Property="Height" Value="44" />
+        <Setter Property="MinWidth" Value="44" />
+        <Setter Property="Background" Value="#66101A26" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Primary}" />
+      </Style>
+
       <!-- ============================ Toasts ============================ -->
       <!-- Accent bar on the left edge of a toast, coloured by kind. -->
       <Style x:Key="Shell.ToastBar" TargetType="Border">
@@ -365,6 +377,75 @@
                   Margin="0,0,24,24"
                   Focusable="False" IsTabStop="False"
                   AutomationProperties.Name="Notifications" />
+
+    <!-- ============================ Picture viewer (lightbox) ============================ -->
+    <!-- Covers everything below the title bar. Esc / Left / Right work while it has focus (it takes focus when it opens). -->
+    <Border x:Name="PreviewOverlay"
+            Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+            Background="#F0060B10"
+            Focusable="True" FocusVisualStyle="{x:Null}"
+            MouseLeftButtonDown="OnPreviewBackdropMouseDown"
+            Visibility="{Binding Preview.IsOpen, Converter={StaticResource Converter.BoolToVisibility}}"
+            AutomationProperties.Name="Picture viewer">
+      <Border.InputBindings>
+        <KeyBinding Key="Escape" Command="{Binding Preview.CloseCommand}" />
+        <KeyBinding Key="Left" Command="{Binding Preview.PreviousCommand}" />
+        <KeyBinding Key="Right" Command="{Binding Preview.NextCommand}" />
+      </Border.InputBindings>
+      <Grid x:Name="PreviewBackdrop" Background="Transparent" Margin="24,16,24,20">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header: title, counter, open in browser, close -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Style="{StaticResource Text.H3}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+            <Run Text="{Binding Preview.Title, Mode=OneWay}" /><Run Text="   " /><Run Text="{Binding Preview.CounterText, Mode=OneWay}" Foreground="{StaticResource Brush.Text.Secondary}" />
+          </TextBlock>
+          <Button Grid.Column="1" Style="{StaticResource Shell.BannerButton}" Content="Open in browser" Command="{Binding Preview.OpenInBrowserCommand}" Margin="0,0,10,0" VerticalAlignment="Center" />
+          <Button Grid.Column="2" Style="{StaticResource Shell.ViewerButton}" Command="{Binding Preview.CloseCommand}" ToolTip="Close (Esc)" AutomationProperties.Name="Close picture viewer">
+            <Path Data="{StaticResource Glyph.Close}" Width="12" Height="12" Stretch="Uniform" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+          </Button>
+        </Grid>
+
+        <!-- Picture -->
+        <Grid Grid.Row="1">
+          <Image Source="{Binding Preview.CurrentPath, Converter={StaticResource Converter.FileToImage}, ConverterParameter=2200}"
+                 Stretch="Uniform" StretchDirection="DownOnly"
+                 RenderOptions.BitmapScalingMode="HighQuality"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="240"
+                      Visibility="{Binding Preview.IsLoading, Converter={StaticResource Converter.BoolToVisibility}}">
+            <TextBlock Style="{StaticResource Text.Secondary}" Text="Loading picture..." TextAlignment="Center" Margin="0,0,0,10" />
+            <ProgressBar IsIndeterminate="True" />
+          </StackPanel>
+          <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Preview.ErrorText}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Visibility="{Binding Preview.ErrorText, Converter={StaticResource Converter.NullToVisibility}}" />
+
+          <Button Style="{StaticResource Shell.ViewerButton}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="4,0,0,0"
+                  Command="{Binding Preview.PreviousCommand}" ToolTip="Previous (Left arrow)" AutomationProperties.Name="Previous picture"
+                  Visibility="{Binding Preview.HasMany, Converter={StaticResource Converter.BoolToVisibility}}">
+            <Path Data="{StaticResource Shell.Glyph.ChevronLeft}" Width="9" Height="15" Stretch="Uniform" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+          </Button>
+          <Button Style="{StaticResource Shell.ViewerButton}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
+                  Command="{Binding Preview.NextCommand}" ToolTip="Next (Right arrow)" AutomationProperties.Name="Next picture"
+                  Visibility="{Binding Preview.HasMany, Converter={StaticResource Converter.BoolToVisibility}}">
+            <Path Data="{StaticResource Shell.Glyph.ChevronRight}" Width="9" Height="15" Stretch="Uniform" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+          </Button>
+        </Grid>
+
+        <TextBlock Grid.Row="2" Style="{StaticResource Text.Caption}" HorizontalAlignment="Center" Margin="0,12,0,0"
+                   Text="Click outside the picture or press Esc to close · Left / Right arrows to browse" />
+      </Grid>
+    </Border>
 
     <!-- ============================ Drop overlay ============================ -->
     <!-- Shown while acceptable files are dragged over the window; not hit-test visible so the grid stays the drop target. -->

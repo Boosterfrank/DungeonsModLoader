@@ -30,6 +30,42 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         DataContext = viewModel;
+        viewModel.Preview.PropertyChanged += OnPreviewPropertyChanged;
+    }
+
+    // ----------------------------------------------------------------------------------------------------------
+    // Picture viewer: the overlay takes keyboard focus when it opens (so Esc / arrows reach its bindings instead
+    // of the page underneath) and gives it back when it closes.
+    // ----------------------------------------------------------------------------------------------------------
+
+    private void OnPreviewPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(ImagePreviewViewModel.IsOpen))
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            if (_viewModel.Preview.IsOpen)
+            {
+                PreviewOverlay.Focus();
+            }
+            else if (PreviewOverlay.IsKeyboardFocusWithin)
+            {
+                Focus();
+            }
+        });
+    }
+
+    /// <summary>A click on the dark backdrop (not on the picture or a button) closes the viewer.</summary>
+    private void OnPreviewBackdropMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (ReferenceEquals(e.OriginalSource, PreviewOverlay) || ReferenceEquals(e.OriginalSource, PreviewBackdrop))
+        {
+            _viewModel.Preview.CloseCommand.Execute(null);
+            e.Handled = true;
+        }
     }
 
     protected override void OnSourceInitialized(EventArgs e)

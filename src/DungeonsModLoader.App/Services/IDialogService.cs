@@ -26,6 +26,9 @@ public interface IDialogService
     /// <summary>Friendly error with an optional expandable technical details block.</summary>
     Task ShowErrorAsync(string title, string message, string? details = null);
 
+    /// <summary>A notice with one button and no other way out (no Esc, no close): used for a mandatory update.</summary>
+    Task ShowRequiredAsync(string title, string message, string buttonText = "OK");
+
     /// <summary>Yes/No style question. <paramref name="isDestructive"/> renders the confirm button in the danger style.</summary>
     Task<bool> ConfirmAsync(string title, string message, string confirmText = "OK", string cancelText = "Cancel", bool isDestructive = false);
 

@@ -74,6 +74,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<BrowseViewModel>();
         services.AddSingleton<ProfilesViewModel>();
         services.AddSingleton<SettingsViewModel>();
+        services.AddSingleton<ImagePreviewViewModel>();
         services.AddTransient<ViewModels.Dialogs.NexusConnectViewModel>();
         return services;
     }

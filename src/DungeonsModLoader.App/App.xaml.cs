@@ -149,18 +149,15 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Asks GitHub for a newer release of the app (at most once a day; off when the setting is off). A result shows
-    /// the banner through the service's event; failures are logged only.
+    /// Asks GitHub for a newer release of the app at every start (off when the setting is off). A result shows the
+    /// banner through the service's event; after two starts on an outdated version the service makes the update
+    /// mandatory. Failures are logged only.
     /// </summary>
     private async Task StartAppUpdateCheckAsync(IServiceProvider services)
     {
         try
         {
-            var update = await services.GetRequiredService<IAppUpdateService>().CheckAsync();
-            if (update is not null)
-            {
-                _log.Information("App update available: {Version}", update.VersionText);
-            }
+            await services.GetRequiredService<IAppUpdateService>().CheckAtStartupAsync();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

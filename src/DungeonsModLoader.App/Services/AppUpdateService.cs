@@ -10,9 +10,10 @@ using Microsoft.Extensions.Logging;
 namespace DungeonsModLoader.App.Services;
 
 /// <summary>
-/// Self-update through GitHub Releases: checks <c>releases/latest</c> of the app's repository (at startup at most
-/// once a day, and on demand from Settings), exposes the newer version for the banner, downloads its installer
-/// with a progress dialog and starts it silently, after which the app closes.
+/// Self-update through GitHub Releases: checks <c>releases/latest</c> of the app's repository at every start and
+/// on demand from Settings, exposes the newer version for the banner, downloads its installer with a progress
+/// dialog and starts it silently, after which the app closes. After two starts on an outdated version the update
+/// becomes mandatory (one-button dialog, then the install).
 /// </summary>
 public interface IAppUpdateService
 {
@@ -34,12 +35,18 @@ public interface IAppUpdateService
 
     /// <summary>
     /// Asks GitHub for the latest release. Without <paramref name="force"/> the call is skipped when the setting is
-    /// off or the last check is less than a day old. Never throws; failures land in <see cref="LastError"/>.
+    /// off. Never throws; failures land in <see cref="LastError"/>.
     /// </summary>
     Task<AppUpdateInfo?> CheckAsync(bool force = false, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The start-up check: honours the setting, counts starts on an outdated version and, past the allowance,
+    /// shows the mandatory dialog and installs the update. Never throws.
+    /// </summary>
+    Task CheckAtStartupAsync();
+
     /// <summary>Downloads the installer (progress dialog), starts it and shuts the app down. Problems become dialogs.</summary>
-    Task InstallAsync(AppUpdateInfo update);
+    Task InstallAsync(AppUpdateInfo update, bool mandatory = false);
 
     void Dismiss();
 }
@@ -47,8 +54,6 @@ public interface IAppUpdateService
 /// <inheritdoc cref="IAppUpdateService"/>
 public sealed class AppUpdateService : IAppUpdateService
 {
-    private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
-
     /// <summary>Inno Setup switches: no wizard pages, close the (already exiting) app if needed, never reboot.</summary>
     private const string InstallerArguments = "/SILENT /CLOSEAPPLICATIONS /NORESTART";
 
@@ -98,19 +103,10 @@ public sealed class AppUpdateService : IAppUpdateService
         }
 
         var settings = _settings.Current;
-        if (!force)
+        if (!force && !settings.CheckForAppUpdates)
         {
-            if (!settings.CheckForAppUpdates)
-            {
-                _logger.LogDebug("App update check skipped: turned off in Settings");
-                return null;
-            }
-
-            if (settings.LastAppUpdateCheckUtc is { } last && DateTimeOffset.UtcNow - last < CheckInterval)
-            {
-                _logger.LogDebug("App update check skipped: last check {Last}", last);
-                return Available;
-            }
+            _logger.LogDebug("App update check skipped: turned off in Settings");
+            return null;
         }
 
         IsChecking = true;
@@ -132,15 +128,7 @@ public sealed class AppUpdateService : IAppUpdateService
                 release?.TagName ?? "(none)", AppInfo.Version, update?.VersionText ?? "no");
 
             settings.LastAppUpdateCheckUtc = LastCheckedUtc;
-            try
-            {
-                await _settings.SaveAsync(cancellationToken);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                _logger.LogWarning(ex, "The app update check time could not be saved");
-            }
-
+            await SaveSettingsQuietlyAsync(cancellationToken);
             return update;
         }
         catch (AppUpdateException ex)
@@ -166,10 +154,51 @@ public sealed class AppUpdateService : IAppUpdateService
         }
     }
 
-    public async Task InstallAsync(AppUpdateInfo update)
+    public async Task CheckAtStartupAsync()
+    {
+        var settings = _settings.Current;
+        if (!settings.CheckForAppUpdates)
+        {
+            _logger.LogDebug("Startup app update check skipped: turned off in Settings");
+            return;
+        }
+
+        var update = await CheckAsync(force: true);
+        if (update is null)
+        {
+            // Up to date (or the check failed; a failure must not wipe the count). Nothing more to do.
+            if (LastError is null && settings.OutdatedLaunchCount != 0)
+            {
+                settings.OutdatedLaunchCount = 0;
+                await SaveSettingsQuietlyAsync();
+            }
+
+            return;
+        }
+
+        settings.OutdatedLaunchCount++;
+        await SaveSettingsQuietlyAsync();
+        _logger.LogInformation(
+            "Started {Current} while {Newer} is available: outdated start {Count} (mandatory after {Free})",
+            AppInfo.Version, update.VersionText, settings.OutdatedLaunchCount, AppUpdatePolicy.FreeOutdatedLaunches);
+
+        if (!AppUpdatePolicy.IsMandatory(settings.OutdatedLaunchCount))
+        {
+            return; // the banner is enough this time
+        }
+
+        await _dialogs.ShowRequiredAsync(
+            "Update required",
+            $"This version of {AppInfo.DisplayName} ({AppInfo.Version}) is out of date. Version {update.VersionText} will now be downloaded and installed; "
+            + "the app restarts when it is done. Your mods, settings and profiles are kept.",
+            "OK");
+        await InstallAsync(update, mandatory: true);
+    }
+
+    public async Task InstallAsync(AppUpdateInfo update, bool mandatory = false)
     {
         ArgumentNullException.ThrowIfNull(update);
-        _logger.LogInformation("Downloading app update {Version} from {Url}", update.VersionText, update.Installer.DownloadUrl);
+        _logger.LogInformation("Downloading app update {Version} from {Url}{Mandatory}", update.VersionText, update.Installer.DownloadUrl, mandatory ? " (mandatory)" : string.Empty);
 
         string installerPath;
         try
@@ -180,7 +209,8 @@ public sealed class AppUpdateService : IAppUpdateService
                 {
                     var adapter = new Progress<DownloadProgress>(d => progress.Report(new ProgressUpdate(ViewModels.Format.Download(d.BytesReceived, d.TotalBytes, d.BytesPerSecond), d.Fraction)));
                     return _downloads.DownloadAsync(update.Installer.DownloadUrl, _paths.DownloadsDirectory, update.Installer.Name, adapter, cancellationToken);
-                });
+                },
+                canCancel: !mandatory);
         }
         catch (OperationCanceledException)
         {
@@ -240,6 +270,18 @@ public sealed class AppUpdateService : IAppUpdateService
         IsDismissed = true;
         _logger.LogDebug("App update banner dismissed for this session");
         RaiseChanged();
+    }
+
+    private async Task SaveSettingsQuietlyAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _settings.SaveAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "The app update settings could not be saved");
+        }
     }
 
     private void RaiseChanged()

@@ -171,6 +171,25 @@
         </Border>
       </DataTemplate>
 
+      <!-- Images tab: one picture tile; clicking opens the full-window viewer. -->
+      <DataTemplate x:Key="Browse.ImageTemplate" DataType="{x:Type vm:ModImageViewModel}">
+        <Button Style="{StaticResource Browse.Card}"
+                Command="{Binding DataContext.OpenImageCommand, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
+                CommandParameter="{Binding}"
+                ToolTip="Click to view large"
+                AutomationProperties.Name="{Binding Caption, StringFormat='Picture {0}'}">
+          <Grid Height="132" ClipToBounds="True">
+            <Border Background="{StaticResource Brush.Bg.Input}" CornerRadius="4" />
+            <Path Data="{StaticResource Icon.Pak}" Width="28" Height="28" Stretch="Uniform"
+                  Fill="{StaticResource Brush.Text.Muted}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Border CornerRadius="4" Background="{Binding Path, Converter={StaticResource Converter.FileToImageBrush}, ConverterParameter=480}" />
+            <Border Style="{DynamicResource Badge}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,8" Background="#B3060B10">
+              <TextBlock Text="{Binding Caption}" Foreground="{StaticResource Brush.Text.Primary}" />
+            </Border>
+          </Grid>
+        </Button>
+      </DataTemplate>
+
       <DataTemplate x:Key="Browse.FileGroupTemplate" DataType="{x:Type vm:BrowseFileGroupViewModel}">
         <StackPanel Margin="0,0,0,18">
           <TextBlock Style="{StaticResource Text.Label}" Text="{Binding Title}" Margin="0,0,0,2" />
@@ -453,19 +472,26 @@
         <!-- Hero picture, tabs and tab content scroll together -->
         <ScrollViewer Grid.Row="2" Margin="0,16,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PanningMode="VerticalOnly">
           <StackPanel>
-            <!-- Hero: whole picture, no cropping, up to 380px tall -->
+            <!-- Hero: whole picture, no cropping, up to 380px tall; click opens the viewer -->
             <Border HorizontalAlignment="Left" Background="{StaticResource Brush.Bg.Input}"
                     BorderBrush="{StaticResource Brush.Border}" BorderThickness="{StaticResource Thickness.Border.Thin}"
                     Margin="0,0,0,18"
                     Visibility="{Binding HasPicture, Converter={StaticResource Converter.BoolToVisibility}}">
               <Image Source="{Binding PicturePath, Converter={StaticResource Converter.FileToImage}, ConverterParameter=1600}"
                      Stretch="Uniform" StretchDirection="DownOnly" MaxHeight="380"
-                     RenderOptions.BitmapScalingMode="HighQuality" />
+                     RenderOptions.BitmapScalingMode="HighQuality"
+                     Cursor="Hand" ToolTip="Click to view large">
+                <Image.InputBindings>
+                  <MouseBinding MouseAction="LeftClick" Command="{Binding OpenHeroCommand}" />
+                </Image.InputBindings>
+              </Image>
             </Border>
 
             <!-- Tabs -->
             <WrapPanel Margin="0,0,0,14">
               <RadioButton Style="{StaticResource Browse.Chip}" GroupName="BrowseDetailTab" Content="Description" IsChecked="{Binding IsDescriptionTab, Mode=TwoWay}" />
+              <RadioButton Style="{StaticResource Browse.Chip}" GroupName="BrowseDetailTab" Content="{Binding ImagesTabTitle}" IsChecked="{Binding IsImagesTab, Mode=TwoWay}"
+                           Visibility="{Binding HasImages, Converter={StaticResource Converter.BoolToVisibility}}" />
               <RadioButton Style="{StaticResource Browse.Chip}" GroupName="BrowseDetailTab" Content="{Binding FilesTabTitle}" IsChecked="{Binding IsFilesTab, Mode=TwoWay}" />
               <RadioButton Style="{StaticResource Browse.Chip}" GroupName="BrowseDetailTab" Content="{Binding RequirementsTabTitle}" IsChecked="{Binding IsRequirementsTab, Mode=TwoWay}"
                            Visibility="{Binding HasRequirements, Converter={StaticResource Converter.BoolToVisibility}}" />
@@ -481,6 +507,19 @@
               <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap" MaxWidth="920" HorizontalAlignment="Left"
                          LineHeight="24" LineStackingStrategy="MaxHeight" Margin="0,0,0,24"
                          controls:BbCodeText.Source="{Binding Description}" />
+            </StackPanel>
+
+            <!-- Images -->
+            <StackPanel Visibility="{Binding IsImagesTab, Converter={StaticResource Converter.BoolToVisibility}}">
+              <TextBlock Style="{StaticResource Text.Secondary}" TextWrapping="Wrap" Margin="0,0,0,12"
+                         Text="The pictures from the mod's page and its description. Click one to view it large." />
+              <ItemsControl ItemsSource="{Binding Images}" ItemTemplate="{StaticResource Browse.ImageTemplate}" Focusable="False">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+              </ItemsControl>
             </StackPanel>
 
             <!-- Files -->

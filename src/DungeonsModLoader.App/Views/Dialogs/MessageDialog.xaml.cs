@@ -46,6 +46,9 @@ public sealed class MessageDialogOptions
     /// itself stays dependency-free, so the caller (the dialog service) supplies the shell action.
     /// </summary>
     public Action? OpenLogsFolder { get; init; }
+
+    /// <summary>False makes the confirm button the only way out: Esc and closing the window are ignored (mandatory notices).</summary>
+    public bool AllowDismiss { get; init; } = true;
 }
 
 /// <summary>
@@ -59,6 +62,7 @@ public partial class MessageDialog : Window
     private Action? _openLogsFolder;
     private bool _focusCancel;
     private bool _isChoice;
+    private bool _allowDismiss = true;
     private Button? _focusTarget;
 
     public MessageDialog()
@@ -81,6 +85,7 @@ public partial class MessageDialog : Window
         TitleText.Text = options.Title;
         MessageText.Text = options.Message;
         _openLogsFolder = options.OpenLogsFolder;
+        _allowDismiss = options.AllowDismiss;
 
         var hasDetails = !string.IsNullOrWhiteSpace(options.Details);
         DetailsToggle.Visibility = hasDetails ? Visibility.Visible : Visibility.Collapsed;
@@ -95,7 +100,7 @@ public partial class MessageDialog : Window
                 SetIcon("i", "Brush.Cyan", "Brush.Cyan.Faint");
                 CancelButton.Visibility = Visibility.Collapsed;
                 OpenLogsButton.Visibility = Visibility.Collapsed;
-                ConfirmButton.IsCancel = true; // Esc dismisses an info dialog like OK does.
+                ConfirmButton.IsCancel = options.AllowDismiss; // Esc dismisses an info dialog like OK does (unless mandatory).
                 break;
 
             case MessageDialogKind.Error:
@@ -196,6 +201,18 @@ public partial class MessageDialog : Window
         {
             ConfirmButton.Focus();
         }
+    }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        // A mandatory notice (AllowDismiss = false) can only leave through its button: Alt+F4 and the like are ignored.
+        if (!_allowDismiss && !Confirmed)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        base.OnClosing(e);
     }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)

@@ -52,12 +52,14 @@ public sealed partial class MainViewModel : ObservableObject
         IToastService toasts,
         IAppUpdateService appUpdates,
         IWindowService windows,
+        ImagePreviewViewModel preview,
         ILogger<MainViewModel> logger)
     {
         Installed = installed;
         Browse = browse;
         Profiles = profiles;
         Settings = settings;
+        Preview = preview;
         _launcher = launcher;
         _game = game;
         _monitor = monitor;
@@ -86,6 +88,9 @@ public sealed partial class MainViewModel : ObservableObject
     public BrowseViewModel Browse { get; }
     public ProfilesViewModel Profiles { get; }
     public SettingsViewModel Settings { get; }
+
+    /// <summary>The full-window picture viewer (opened from a mod's Images tab).</summary>
+    public ImagePreviewViewModel Preview { get; }
 
     /// <summary>Bottom-right notifications ("Installed X", "Waiting for Nexus Mods..."), bound by the window.</summary>
     public ReadOnlyObservableCollection<ToastViewModel> Toasts => _toasts.Toasts;
