@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 
@@ -26,6 +26,10 @@ public sealed class GameProcessMonitor : IGameProcessMonitor
     private Task? _loop;
     private volatile bool _isGameRunning;
     private bool _disposed;
+
+    /// <summary>The state subscribers were last told about, and whether a thread is currently publishing.</summary>
+    private bool _lastPublished;
+    private bool _publishing;
 
     /// <summary>Incremented by Start/Stop/Dispose so a poll that began before the change can never publish its result.</summary>
     private int _generation;
@@ -280,7 +284,6 @@ public sealed class GameProcessMonitor : IGameProcessMonitor
 
     private void SetRunning(bool running, int generation)
     {
-        bool changed;
         lock (_gate)
         {
             if (_disposed || generation != _generation)
@@ -289,23 +292,55 @@ public sealed class GameProcessMonitor : IGameProcessMonitor
                 return;
             }
 
-            changed = _isGameRunning != running;
+            if (_isGameRunning == running)
+            {
+                return;
+            }
+
             _isGameRunning = running;
+            if (_publishing)
+            {
+                // Another thread is delivering events right now; it re-reads the state and delivers this change too.
+                return;
+            }
+
+            _publishing = true;
         }
 
-        if (!changed)
-        {
-            return;
-        }
+        PublishChanges();
+    }
 
-        _logger.LogInformation("Game is now {State}", running ? "running" : "not running");
-        try
+    /// <summary>
+    /// Raises <see cref="GameRunningChanged"/> until subscribers know the current state. Runs outside the lock
+    /// (handlers may call back into the monitor), one publisher at a time, always with the latest state: a slow
+    /// "running" poll result can therefore never be delivered after a later <see cref="Stop"/> said "not running".
+    /// </summary>
+    private void PublishChanges()
+    {
+        while (true)
         {
-            GameRunningChanged?.Invoke(this, running);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "A GameRunningChanged handler threw");
+            bool state;
+            lock (_gate)
+            {
+                state = _isGameRunning;
+                if (state == _lastPublished)
+                {
+                    _publishing = false;
+                    return;
+                }
+
+                _lastPublished = state;
+            }
+
+            try
+            {
+                _logger.LogInformation("Game is now {State}", state ? "running" : "not running");
+                GameRunningChanged?.Invoke(this, state);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "A GameRunningChanged handler threw");
+            }
         }
     }
 
