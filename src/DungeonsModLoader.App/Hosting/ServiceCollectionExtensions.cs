@@ -1,15 +1,18 @@
+using System.Net.Http;
 using DungeonsModLoader.App.Services;
 using DungeonsModLoader.App.ViewModels;
 using DungeonsModLoader.App.ViewModels.Pages;
 using DungeonsModLoader.App.Views;
 using DungeonsModLoader.App.Views.Dialogs;
 using DungeonsModLoader.Core;
+using DungeonsModLoader.Core.AppUpdates;
 using DungeonsModLoader.Core.DependencyInjection;
 using DungeonsModLoader.Nexus.Auth;
 using DungeonsModLoader.Nexus.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace DungeonsModLoader.App.Hosting;
 
@@ -38,6 +41,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IToastService, ToastService>();
         services.AddSingleton<IAppNavigator, AppNavigator>();
         services.AddSingleton<INexusConnectPrompt, NexusConnectPrompt>();
+
+        // App self-update: GitHub Releases of the repository in AppInfo.GitHubRepository.
+        services.AddSingleton<IGitHubReleaseClient>(provider => new GitHubReleaseClient(
+            () => provider.GetRequiredService<IHttpClientFactory>().CreateClient(HttpClientName),
+            provider.GetRequiredService<ILogger<GitHubReleaseClient>>()));
+        services.AddSingleton<IAppUpdateService, AppUpdateService>();
 
         services
             .AddCoreInfrastructure()

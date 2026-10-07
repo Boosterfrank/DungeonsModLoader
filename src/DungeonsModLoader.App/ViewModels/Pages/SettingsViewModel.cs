@@ -33,6 +33,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     private readonly INexusSession _nexus;
     private readonly INexusConnectPrompt _connect;
     private readonly INxmProtocolRegistration _nxm;
+    private readonly IAppUpdateService _appUpdates;
     private readonly ILogger<SettingsViewModel> _logger;
     private int _confirmationVersion;
     private int _nexusConfirmationVersion;
@@ -49,6 +50,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         INexusSession nexus,
         INexusConnectPrompt connect,
         INxmProtocolRegistration nxm,
+        IAppUpdateService appUpdates,
         ILogger<SettingsViewModel> logger)
     {
         _windows = windows;
@@ -61,6 +63,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         _nexus = nexus;
         _connect = connect;
         _nxm = nxm;
+        _appUpdates = appUpdates;
         _logger = logger;
 
         RefreshGame();
@@ -68,6 +71,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         RefreshNxmHandler();
         _gameContext.Changed += OnGameContextChanged;
         _nexus.Changed += (_, _) => OnUiThread(RefreshNexus);
+        _appUpdates.Changed += (_, _) => OnUiThread(RefreshAppUpdate);
     }
 
     public override string Title => "Settings";
@@ -549,6 +553,85 @@ public sealed partial class SettingsViewModel : PageViewModel
             : state.IsOtherApp
                 ? $"{state.HandlerName ?? "Another program"} currently handles nxm:// links. Turning this on lets {AppInfo.DisplayName} receive them instead (for your Windows account only; turn it off to hand them back)."
                 : "Lets the \"Mod Manager Download\" and \"Slow download\" buttons on Nexus Mods send files to this app (free accounts download this way).";
+    }
+
+    // ------------------------------------------------------------------------------------------------------
+    // About: app updates (GitHub Releases)
+    // ------------------------------------------------------------------------------------------------------
+
+    /// <summary>Settings toggle: look for a newer release when the app starts (at most once a day).</summary>
+    public bool AutoCheckAppUpdates
+    {
+        get => _settings.Current.CheckForAppUpdates;
+        set
+        {
+            if (_settings.Current.CheckForAppUpdates == value)
+            {
+                return;
+            }
+
+            _settings.Current.CheckForAppUpdates = value;
+            OnPropertyChanged();
+            _logger.LogInformation("Automatic app update check turned {State}", value ? "on" : "off");
+            _ = SaveSettingsQuietlyAsync();
+        }
+    }
+
+    public bool IsCheckingAppUpdate => _appUpdates.IsChecking;
+
+    public bool HasAppUpdate => _appUpdates.Available is not null;
+
+    public string AppUpdateStatusText => _appUpdates.IsChecking
+        ? "Checking GitHub for a newer version..."
+        : _appUpdates.Available is { } update
+            ? $"Version {update.VersionText} is available (you have {AppInfo.Version})."
+            : _appUpdates.LastError is { } error
+                ? error
+                : _appUpdates.LastCheckedUtc is not null
+                    ? $"You have the latest version ({AppInfo.Version})."
+                    : $"Version {AppInfo.Version}. Not checked for updates yet.";
+
+    private bool CanCheckForAppUpdates() => !_appUpdates.IsChecking;
+
+    [RelayCommand(CanExecute = nameof(CanCheckForAppUpdates))]
+    private Task CheckForAppUpdatesAsync() => _appUpdates.CheckAsync(force: true);
+
+    [RelayCommand]
+    private async Task InstallAppUpdateAsync()
+    {
+        if (_appUpdates.Available is { } update)
+        {
+            await _appUpdates.InstallAsync(update);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenReleaseNotes()
+    {
+        if (_appUpdates.Available is { } update)
+        {
+            _windows.OpenUrl(update.ReleaseUrl.AbsoluteUri);
+        }
+    }
+
+    private void RefreshAppUpdate()
+    {
+        OnPropertyChanged(nameof(IsCheckingAppUpdate));
+        OnPropertyChanged(nameof(HasAppUpdate));
+        OnPropertyChanged(nameof(AppUpdateStatusText));
+        CheckForAppUpdatesCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task SaveSettingsQuietlyAsync()
+    {
+        try
+        {
+            await _settings.SaveAsync();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Settings could not be saved");
+        }
     }
 
     // ------------------------------------------------------------------------------------------------------

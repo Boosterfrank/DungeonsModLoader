@@ -20,15 +20,28 @@ public enum BrowseTab
     Search,
 }
 
+/// <summary>One entry of the pager under the grid: a page number, or a "…" gap between distant numbers.</summary>
+public sealed record PageLinkViewModel(int Number, bool IsCurrent, bool IsGap)
+{
+    public string Text => IsGap ? "…" : Number.ToString();
+
+    public bool IsClickable => !IsGap;
+
+    public string AutomationName => IsGap ? "More pages" : $"Page {Number}";
+}
+
 /// <summary>
 /// Browse page: Trending / Latest added / Recently updated lists and text search on Nexus Mods as a grid of
-/// cards; clicking a card opens the mod as a full page (Back returns to the grid exactly as it was). Works
-/// without an API key (public GraphQL); downloads need one and start the connect dialog when it is missing.
-/// Loads lazily the first time the page is shown.
+/// cards with page navigation (24 per page; Nexus lists are long); clicking a card opens the mod as a full page
+/// (Back returns to the same page of the grid). Works without an API key (public GraphQL); downloads need one
+/// and start the connect dialog when it is missing. Loads lazily the first time the page is shown.
 /// </summary>
 public sealed partial class BrowseViewModel : PageViewModel
 {
-    private const int PageSize = 24;
+    public const int PageSize = 24;
+
+    /// <summary>Page numbers shown at once; beyond that the pager shows the first, the last and a window around the current page.</summary>
+    private const int PagerSlots = 7;
 
     private readonly INexusApiClient _client;
     private readonly INexusSession _session;
@@ -45,7 +58,6 @@ public sealed partial class BrowseViewModel : PageViewModel
     private readonly Stack<BrowseDetailViewModel> _history = new();
 
     private int _loadVersion;
-    private int _offset;
     private string _activeQuery = string.Empty;
     private bool _loadedOnce;
 
@@ -80,6 +92,9 @@ public sealed partial class BrowseViewModel : PageViewModel
     }
 
     public override string Title => "Browse";
+
+    /// <summary>Raised after a different page of results was put into <see cref="Cards"/> (the view scrolls back to the top).</summary>
+    public event EventHandler? PageChanged;
 
     public ObservableCollection<BrowseModCardViewModel> Cards { get; } = new();
 
@@ -119,16 +134,8 @@ public sealed partial class BrowseViewModel : PageViewModel
     private string _searchText = string.Empty;
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(LoadMoreCommand), nameof(RefreshCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RefreshCommand), nameof(NextPageCommand), nameof(PreviousPageCommand), nameof(GoToPageCommand))]
     private bool _isLoading;
-
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(LoadMoreCommand))]
-    private bool _isLoadingMore;
-
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(LoadMoreCommand))]
-    private bool _hasMore;
 
     [ObservableProperty]
     private string? _errorText;
@@ -138,6 +145,94 @@ public sealed partial class BrowseViewModel : PageViewModel
     private int _totalCount;
 
     public string TotalCountText => TotalCount == 1 ? "1 mod" : $"{TotalCount} mods";
+
+    // ------------------------------------------------------------------------------------------------------
+    // Pages
+    // ------------------------------------------------------------------------------------------------------
+
+    /// <summary>1-based page of results in the grid.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PagerText))]
+    [NotifyCanExecuteChangedFor(nameof(NextPageCommand), nameof(PreviousPageCommand))]
+    private int _pageIndex = 1;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PagerText), nameof(ShowPager))]
+    [NotifyCanExecuteChangedFor(nameof(NextPageCommand), nameof(PreviousPageCommand))]
+    private int _pageCount = 1;
+
+    /// <summary>The numbers (and gaps) of the pager, rebuilt with every page load.</summary>
+    public ObservableCollection<PageLinkViewModel> PageLinks { get; } = new();
+
+    public string PagerText => PageCount <= 1 ? string.Empty : $"Page {PageIndex} of {PageCount}";
+
+    public bool ShowPager => PageCount > 1;
+
+    private bool CanGoNext() => !IsLoading && PageIndex < PageCount;
+
+    [RelayCommand(CanExecute = nameof(CanGoNext))]
+    private Task NextPageAsync() => LoadPageAsync(PageIndex + 1);
+
+    private bool CanGoPrevious() => !IsLoading && PageIndex > 1;
+
+    [RelayCommand(CanExecute = nameof(CanGoPrevious))]
+    private Task PreviousPageAsync() => LoadPageAsync(PageIndex - 1);
+
+    private bool CanGoToPage(PageLinkViewModel? link) => !IsLoading && link is { IsGap: false };
+
+    [RelayCommand(CanExecute = nameof(CanGoToPage))]
+    private Task GoToPageAsync(PageLinkViewModel? link) =>
+        link is null || link.IsGap || link.Number == PageIndex ? Task.CompletedTask : LoadPageAsync(link.Number);
+
+    /// <summary>First, last and a window around the current page; "…" where numbers are skipped.</summary>
+    private void RebuildPageLinks()
+    {
+        PageLinks.Clear();
+        if (PageCount <= 1)
+        {
+            return;
+        }
+
+        var numbers = new List<int>();
+        if (PageCount <= PagerSlots)
+        {
+            numbers.AddRange(Enumerable.Range(1, PageCount));
+        }
+        else
+        {
+            var inner = PagerSlots - 2; // slots left after the first and last page
+            var start = Math.Clamp(PageIndex - inner / 2, 2, PageCount - inner);
+            var end = start + inner - 1;
+            numbers.Add(1);
+            if (start > 2)
+            {
+                numbers.Add(0); // gap
+                start++;
+            }
+
+            if (end < PageCount - 1)
+            {
+                end--;
+            }
+
+            numbers.AddRange(Enumerable.Range(start, end - start + 1));
+            if (end < PageCount - 1)
+            {
+                numbers.Add(0);
+            }
+
+            numbers.Add(PageCount);
+        }
+
+        foreach (var number in numbers)
+        {
+            PageLinks.Add(number == 0 ? new PageLinkViewModel(0, false, true) : new PageLinkViewModel(number, number == PageIndex, false));
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------
+    // Account, detail
+    // ------------------------------------------------------------------------------------------------------
 
     [ObservableProperty]
     private string _accountText = string.Empty;
@@ -171,7 +266,7 @@ public sealed partial class BrowseViewModel : PageViewModel
             return;
         }
 
-        _ = LoadAsync(reset: true);
+        _ = LoadPageAsync(1);
     }
 
     [RelayCommand]
@@ -181,18 +276,13 @@ public sealed partial class BrowseViewModel : PageViewModel
         _activeQuery = query;
         Tab = BrowseTab.Search;
         OnPropertyChanged(nameof(TabTitle));
-        return LoadAsync(reset: true);
+        return LoadPageAsync(1);
     }
 
     [RelayCommand(CanExecute = nameof(CanRefresh))]
-    private Task RefreshAsync() => LoadAsync(reset: true, refresh: true);
+    private Task RefreshAsync() => LoadPageAsync(PageIndex, refresh: true);
 
     private bool CanRefresh() => !IsLoading;
-
-    [RelayCommand(CanExecute = nameof(CanLoadMore))]
-    private Task LoadMoreAsync() => LoadAsync(reset: false);
-
-    private bool CanLoadMore() => HasMore && !IsLoading && !IsLoadingMore;
 
     /// <summary>A card was clicked: open the mod as a full page.</summary>
     [RelayCommand]
@@ -303,40 +393,35 @@ public sealed partial class BrowseViewModel : PageViewModel
         }
 
         Tab = tab;
-        _ = LoadAsync(reset: true);
+        _ = LoadPageAsync(1);
     }
 
-    private async Task LoadAsync(bool reset, bool refresh = false)
+    // ------------------------------------------------------------------------------------------------------
+    // Loading
+    // ------------------------------------------------------------------------------------------------------
+
+    /// <summary>Loads one page of the current list / search into the grid (replacing what is there).</summary>
+    private async Task LoadPageAsync(int page, bool refresh = false)
     {
+        page = Math.Max(1, page);
         var version = ++_loadVersion;
-        if (reset)
-        {
-            _offset = 0;
-            IsLoading = true;
-            ErrorText = null;
-        }
-        else
-        {
-            IsLoadingMore = true;
-        }
+        var offset = (page - 1) * PageSize;
+        IsLoading = true;
+        ErrorText = null;
 
         try
         {
-            var page = Tab == BrowseTab.Search
-                ? await _client.SearchAsync(_activeQuery, _offset, PageSize, refresh)
-                : await _client.GetListAsync(ToKind(Tab), _offset, PageSize, refresh);
+            var result = Tab == BrowseTab.Search
+                ? await _client.SearchAsync(_activeQuery, offset, PageSize, refresh)
+                : await _client.GetListAsync(ToKind(Tab), offset, PageSize, refresh);
 
             if (version != _loadVersion)
             {
                 return; // superseded by a newer request
             }
 
-            if (reset)
-            {
-                Cards.Clear();
-            }
-
-            foreach (var mod in page.Items)
+            Cards.Clear();
+            foreach (var mod in result.Items)
             {
                 var card = new BrowseModCardViewModel(mod);
                 card.RefreshState(_mods, _updates);
@@ -345,11 +430,13 @@ public sealed partial class BrowseViewModel : PageViewModel
                 _ = LoadThumbnailAsync(card);
             }
 
-            _offset += page.Items.Count;
-            TotalCount = page.TotalCount;
-            HasMore = page.HasMore && page.Items.Count > 0;
+            TotalCount = result.TotalCount;
+            PageCount = Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
+            PageIndex = Math.Min(page, PageCount);
+            RebuildPageLinks();
             _loadedOnce = true;
-            _logger.LogDebug("Browse {Tab} loaded {Count} card(s), total {Total}, more: {More}", Tab, Cards.Count, TotalCount, HasMore);
+            _logger.LogDebug("Browse {Tab} page {Page}/{Pages}: {Count} card(s), total {Total}", Tab, PageIndex, PageCount, Cards.Count, TotalCount);
+            PageChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (NexusException ex)
         {
@@ -358,13 +445,13 @@ public sealed partial class BrowseViewModel : PageViewModel
                 return;
             }
 
-            _logger.LogWarning("Browse {Tab} failed: {Message}", Tab, ex.Message);
+            _logger.LogWarning("Browse {Tab} page {Page} failed: {Message}", Tab, page, ex.Message);
             ErrorText = ex.Message;
             _loadedOnce = true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Browse {Tab} failed unexpectedly", Tab);
+            _logger.LogError(ex, "Browse {Tab} page {Page} failed unexpectedly", Tab, page);
             ErrorText = "Something went wrong while talking to Nexus Mods. See the log for details.";
             _loadedOnce = true;
         }
@@ -373,7 +460,6 @@ public sealed partial class BrowseViewModel : PageViewModel
             if (version == _loadVersion)
             {
                 IsLoading = false;
-                IsLoadingMore = false;
                 OnPropertyChanged(nameof(ShowEmpty));
             }
         }

@@ -185,7 +185,23 @@
             <TextBlock Style="{StaticResource Text.Secondary}" Margin="0,4,0,0">
               <Run Text="A mod manager for" /><Run Text=" " /><Run Text="{x:Static core:AppInfo.GameDisplayName}" /><Run Text="." />
             </TextBlock>
-            <WrapPanel Margin="0,16,0,-8">
+
+            <!-- App updates (GitHub Releases) -->
+            <TextBlock Style="{StaticResource Text.Label}" Text="UPDATES" Margin="0,16,0,6" />
+            <TextBlock Style="{StaticResource Text.Small}" Text="{Binding AppUpdateStatusText}" TextWrapping="Wrap" AutomationProperties.Name="App update status" />
+            <ProgressBar IsIndeterminate="True" Margin="0,8,0,0" Visibility="{Binding IsCheckingAppUpdate, Converter={StaticResource Converter.BoolToVisibility}}" />
+            <WrapPanel Margin="0,10,0,0">
+              <Button Style="{DynamicResource Button.Primary}" Content="Update now" Command="{Binding InstallAppUpdateCommand}" Margin="0,0,8,8"
+                      Visibility="{Binding HasAppUpdate, Converter={StaticResource Converter.BoolToVisibility}}" />
+              <Button Style="{DynamicResource Button.Secondary}" Content="What's new" Command="{Binding OpenReleaseNotesCommand}" Margin="0,0,8,8"
+                      Visibility="{Binding HasAppUpdate, Converter={StaticResource Converter.BoolToVisibility}}" />
+              <Button Style="{DynamicResource Button.Secondary}" Content="Check for updates" Command="{Binding CheckForAppUpdatesCommand}" Margin="0,0,8,8"
+                      AutomationProperties.Name="Check for app updates" />
+            </WrapPanel>
+            <CheckBox Content="Check for updates when the app starts" IsChecked="{Binding AutoCheckAppUpdates, Mode=TwoWay}" Margin="0,2,0,0" />
+
+            <Separator Style="{DynamicResource Divider}" Margin="0,16,0,0" />
+            <WrapPanel Margin="0,8,0,-8">
               <Button Style="{DynamicResource Button.Secondary}" Content="Open logs folder" Command="{Binding OpenLogsFolderCommand}" Margin="0,0,8,8" />
               <Button Style="{DynamicResource Button.Secondary}" Content="Open data folder" Command="{Binding OpenDataFolderCommand}" Margin="0,0,8,8" />
               <Button Style="{DynamicResource Button.Secondary}" Content="Theme swatches" Command="{Binding OpenSwatchesCommand}" Margin="0,0,8,8" />

@@ -7,6 +7,7 @@
     <RootNamespace>DungeonsModLoader.App</RootNamespace>
     <AssemblyName>DungeonsModLoader</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 

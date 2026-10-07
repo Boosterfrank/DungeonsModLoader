@@ -236,6 +236,7 @@
         <RowDefinition Height="Auto" />
         <RowDefinition Height="*" />
         <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
 
       <!-- Header -->
@@ -309,22 +310,14 @@
 
       <!-- Card grid -->
       <Grid Grid.Row="3" Margin="0,16,0,0">
-        <ScrollViewer x:Name="CardsScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="OnCardsScrollChanged">
-          <StackPanel>
-            <ItemsControl ItemsSource="{Binding Cards}" ItemTemplate="{StaticResource Browse.CardTemplate}" Focusable="False">
-              <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                  <WrapPanel Orientation="Horizontal" />
-                </ItemsPanelTemplate>
-              </ItemsControl.ItemsPanel>
-            </ItemsControl>
-            <Button Style="{StaticResource Browse.SmallButton}" Content="Load more" HorizontalAlignment="Center" Margin="0,8,0,16"
-                    Command="{Binding LoadMoreCommand}"
-                    Visibility="{Binding HasMore, Converter={StaticResource Converter.BoolToVisibility}}" />
-            <StackPanel Margin="0,8,0,16" HorizontalAlignment="Center" Visibility="{Binding IsLoadingMore, Converter={StaticResource Converter.BoolToVisibility}}">
-              <ProgressBar Width="160" IsIndeterminate="True" />
-            </StackPanel>
-          </StackPanel>
+        <ScrollViewer x:Name="CardsScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding Cards}" ItemTemplate="{StaticResource Browse.CardTemplate}" Focusable="False">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
         </ScrollViewer>
 
         <!-- First load -->
@@ -351,8 +344,49 @@
         </StackPanel>
       </Grid>
 
+      <!-- Pager: Previous | 1 2 3 … 9 | Next (hidden when everything fits on one page) -->
+      <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,12,0,0"
+                  Visibility="{Binding ShowPager, Converter={StaticResource Converter.BoolToVisibility}}">
+        <Button Style="{StaticResource Browse.SmallButton}" Content="‹  Previous" Margin="0,0,10,0" Command="{Binding PreviousPageCommand}"
+                AutomationProperties.Name="Previous page" />
+        <ItemsControl ItemsSource="{Binding PageLinks}" Focusable="False" VerticalAlignment="Center">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="{x:Type vm:PageLinkViewModel}">
+              <Button Content="{Binding Text}" Margin="0,0,6,0" MinWidth="34" Padding="10,0"
+                      Command="{Binding DataContext.GoToPageCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                      CommandParameter="{Binding}"
+                      AutomationProperties.Name="{Binding AutomationName}">
+                <Button.Style>
+                  <Style TargetType="Button" BasedOn="{StaticResource Browse.SmallButton}">
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                        <Setter Property="Background" Value="{StaticResource Brush.Accent.Gradient}" />
+                        <Setter Property="Foreground" Value="{StaticResource Brush.Text.OnAccent}" />
+                        <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent.Dark}" />
+                      </DataTrigger>
+                      <DataTrigger Binding="{Binding IsGap}" Value="True">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderBrush" Value="Transparent" />
+                        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Muted}" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Button.Style>
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Button Style="{StaticResource Browse.SmallButton}" Content="Next  ›" Margin="4,0,0,0" Command="{Binding NextPageCommand}"
+                AutomationProperties.Name="Next page" />
+      </StackPanel>
+
       <!-- Footer -->
-      <StackPanel Grid.Row="4">
+      <StackPanel Grid.Row="5">
         <Separator Style="{DynamicResource Divider}" Margin="0,8,0,8" />
         <Grid>
           <Grid.ColumnDefinitions>
@@ -360,7 +394,7 @@
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
           <TextBlock Grid.Column="0" Style="{StaticResource Text.Small}" VerticalAlignment="Center">
-            <Run Text="{Binding TotalCountText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding AccountText, Mode=OneWay}" />
+            <Run Text="{Binding TotalCountText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding PagerText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding AccountText, Mode=OneWay}" />
           </TextBlock>
           <TextBlock Grid.Column="1" Style="{StaticResource Text.Caption}" Text="{Binding RateLimitText}" VerticalAlignment="Center" />
         </Grid>

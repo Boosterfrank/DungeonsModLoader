@@ -30,6 +30,8 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IInstallCoordinator _installs;
     private readonly IDialogService _dialogs;
     private readonly IToastService _toasts;
+    private readonly IAppUpdateService _appUpdates;
+    private readonly IWindowService _windows;
     private readonly ILogger<MainViewModel> _logger;
 
     /// <summary>Incremented per status message so a delayed clear only removes the message it was scheduled for.</summary>
@@ -48,6 +50,8 @@ public sealed partial class MainViewModel : ObservableObject
         IInstallCoordinator installs,
         IDialogService dialogs,
         IToastService toasts,
+        IAppUpdateService appUpdates,
+        IWindowService windows,
         ILogger<MainViewModel> logger)
     {
         Installed = installed;
@@ -62,6 +66,8 @@ public sealed partial class MainViewModel : ObservableObject
         _installs = installs;
         _dialogs = dialogs;
         _toasts = toasts;
+        _appUpdates = appUpdates;
+        _windows = windows;
         _logger = logger;
 
         _currentPage = installed;
@@ -72,6 +78,7 @@ public sealed partial class MainViewModel : ObservableObject
         _monitor.GameRunningChanged += OnGameRunningChanged;
         _installs.Installed += OnModInstalled;
         _installs.Updated += OnModUpdated;
+        _appUpdates.Changed += (_, _) => OnUiThread(RefreshUpdateBanner);
         ApplyGameContext();
     }
 
@@ -82,6 +89,45 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Bottom-right notifications ("Installed X", "Waiting for Nexus Mods..."), bound by the window.</summary>
     public ReadOnlyObservableCollection<ToastViewModel> Toasts => _toasts.Toasts;
+
+    // ----------------------------------------------------------------------------------------------------------
+    // App update banner (GitHub Releases)
+    // ----------------------------------------------------------------------------------------------------------
+
+    /// <summary>A newer release is known and the banner was not dismissed this session.</summary>
+    public bool ShowUpdateBanner => _appUpdates.Available is not null && !_appUpdates.IsDismissed;
+
+    public string UpdateBannerText => _appUpdates.Available is { } update
+        ? $"{AppInfo.DisplayName} {update.VersionText} is available (you have {AppInfo.Version})."
+        : string.Empty;
+
+    /// <summary>"Update now": downloads the installer and starts it; the app closes for the update.</summary>
+    [RelayCommand]
+    private async Task InstallAppUpdateAsync()
+    {
+        if (_appUpdates.Available is { } update)
+        {
+            await _appUpdates.InstallAsync(update);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenReleaseNotes()
+    {
+        if (_appUpdates.Available is { } update)
+        {
+            _windows.OpenUrl(update.ReleaseUrl.AbsoluteUri);
+        }
+    }
+
+    [RelayCommand]
+    private void DismissUpdate() => _appUpdates.Dismiss();
+
+    private void RefreshUpdateBanner()
+    {
+        OnPropertyChanged(nameof(ShowUpdateBanner));
+        OnPropertyChanged(nameof(UpdateBannerText));
+    }
 
     /// <summary>The page shown in the content area. Never null; defaults to <see cref="Installed"/>.</summary>
     [ObservableProperty]

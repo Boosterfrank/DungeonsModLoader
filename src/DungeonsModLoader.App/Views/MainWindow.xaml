@@ -81,6 +81,21 @@
         </Style.Triggers>
       </Style>
 
+      <!-- Small buttons of the app update banner -->
+      <Style x:Key="Shell.BannerButton" TargetType="Button" BasedOn="{StaticResource Button.Secondary}">
+        <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+      </Style>
+
+      <Style x:Key="Shell.BannerPrimaryButton" TargetType="Button" BasedOn="{StaticResource Button.Primary}">
+        <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+      </Style>
+
       <Style x:Key="Shell.ToastAction" TargetType="Button" BasedOn="{StaticResource Button.Secondary}">
         <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
         <Setter Property="MinWidth" Value="0" />
@@ -307,8 +322,40 @@
     </Border>
 
     <!-- ============================ Content ============================ -->
-    <shell:TransitioningContentControl Grid.Row="1" Grid.Column="1"
-                                       Content="{Binding CurrentPage}" />
+    <Grid Grid.Row="1" Grid.Column="1">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+
+      <!-- App update banner (non-blocking): shown when a newer GitHub release is known. -->
+      <Border Grid.Row="0"
+              Background="{StaticResource Brush.Accent.Faint}"
+              BorderBrush="{StaticResource Brush.Accent.Dark}"
+              BorderThickness="0,0,0,1"
+              Padding="32,10"
+              Visibility="{Binding ShowUpdateBanner, Converter={StaticResource Converter.BoolToVisibility}}"
+              AutomationProperties.Name="Update banner">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Style="{StaticResource Text.Body}" Text="{Binding UpdateBannerText}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,16,0" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+            <Button Style="{StaticResource Shell.BannerButton}" Content="What's new" Command="{Binding OpenReleaseNotesCommand}" Margin="0,0,8,0" />
+            <Button Style="{StaticResource Shell.BannerPrimaryButton}" Content="Update now" Command="{Binding InstallAppUpdateCommand}" Margin="0,0,8,0"
+                    ToolTip="Downloads the new installer and runs it; the app closes and comes back updated" />
+            <Button Style="{DynamicResource Button.Icon}" Width="28" Height="28" Command="{Binding DismissUpdateCommand}" ToolTip="Not now" AutomationProperties.Name="Dismiss update banner">
+              <Path Data="{StaticResource Glyph.Close}" Width="9" Height="9" Stretch="Uniform"
+                    Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <shell:TransitioningContentControl Grid.Row="1" Content="{Binding CurrentPage}" />
+    </Grid>
 
     <!-- ============================ Toasts (bottom-right) ============================ -->
     <ItemsControl Grid.Row="1" Grid.Column="1"

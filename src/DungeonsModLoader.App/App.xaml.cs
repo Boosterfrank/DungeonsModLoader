@@ -145,6 +145,27 @@ public partial class App : Application
         _host.Services.GetRequiredService<ISingleInstanceServer>().Start(args => Dispatcher.InvokeAsync(() => HandleArgumentsAsync(args)).Task.Unwrap());
 
         _ = StartNexusBackgroundAsync(_host.Services, e.Args);
+        _ = StartAppUpdateCheckAsync(_host.Services);
+    }
+
+    /// <summary>
+    /// Asks GitHub for a newer release of the app (at most once a day; off when the setting is off). A result shows
+    /// the banner through the service's event; failures are logged only.
+    /// </summary>
+    private async Task StartAppUpdateCheckAsync(IServiceProvider services)
+    {
+        try
+        {
+            var update = await services.GetRequiredService<IAppUpdateService>().CheckAsync();
+            if (update is not null)
+            {
+                _log.Information("App update available: {Version}", update.VersionText);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.Warning(ex, "Startup app update check failed");
+        }
     }
 
     /// <summary>

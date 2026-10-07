@@ -6,30 +6,32 @@ namespace DungeonsModLoader.App.Views.Pages;
 
 /// <summary>
 /// Browse page. DataContext is the <c>BrowseViewModel</c> (set by the shell's page DataTemplate). The code-behind
-/// triggers the lazy first load and the "load more when scrolled to the bottom" behaviour of the card grid.
+/// triggers the lazy first load and scrolls the grid back to the top when another page of results is shown.
 /// </summary>
 public partial class BrowsePage : UserControl
 {
     public BrowsePage()
     {
         InitializeComponent();
+        DataContextChanged += OnDataContextChanged;
     }
 
     private BrowseViewModel? ViewModel => DataContext as BrowseViewModel;
 
-    private void OnLoaded(object sender, RoutedEventArgs e) => ViewModel?.EnsureLoaded();
-
-    private void OnCardsScrollChanged(object sender, ScrollChangedEventArgs e)
+    private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (ViewModel is not { } vm || e.ExtentHeight <= 0)
+        if (e.OldValue is BrowseViewModel old)
         {
-            return;
+            old.PageChanged -= OnPageChanged;
         }
 
-        // Within one card height of the bottom: fetch the next page.
-        if (e.VerticalOffset + e.ViewportHeight >= e.ExtentHeight - 240 && vm.LoadMoreCommand.CanExecute(null))
+        if (e.NewValue is BrowseViewModel vm)
         {
-            vm.LoadMoreCommand.Execute(null);
+            vm.PageChanged += OnPageChanged;
         }
     }
+
+    private void OnLoaded(object sender, RoutedEventArgs e) => ViewModel?.EnsureLoaded();
+
+    private void OnPageChanged(object? sender, EventArgs e) => CardsScroller.ScrollToTop();
 }

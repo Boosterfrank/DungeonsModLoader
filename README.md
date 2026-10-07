@@ -25,18 +25,61 @@ Developer switches:
 - `--swatch` opens the theme swatch window (design tokens, typography, control gallery).
 - `--data-dir <folder>` uses an isolated app data folder (settings, manifest, profiles, logs, cache) instead of `%LOCALAPPDATA%\DungeonsModLoader`.
 
+## Build the installer
+
+```powershell
+.\build.ps1
+```
+
+One command: runs the tests, publishes the app as a self-contained single-file executable (`publish\win-x64\`,
+no .NET runtime needed on the target PC), compiles the Inno Setup script and writes
+`dist\DungeonsModLoader-Setup-<version>.exe` plus a `.sha256` file. Switches: `-SkipTests`, `-SkipInstaller`
+(publish only), `-Sign` (code signing; a placeholder until a certificate is set up, see the block in the script).
+Requires the .NET 8 SDK and Inno Setup 6 (`ISCC.exe` is looked up in the usual install folders and on `PATH`).
+
+The installer (`installer\setup.iss`):
+
+- installs per user into `%LOCALAPPDATA%\Programs\DungeonsModLoader` (no admin rights), with a Start menu entry and an
+  optional desktop shortcut;
+- offers to open Nexus Mods `nxm://` links with the app. The task is pre-selected when no other program handles
+  them and left off when another mod manager (e.g. Vortex) does, so an install never takes the links over silently;
+- shows the licence, offers "Launch now", and closes a running copy of the app before replacing it;
+- on uninstall **never touches your mods** in the game folder, removes the `nxm://` registration only if it still
+  points to this install, and asks whether to delete the app data (`%LOCALAPPDATA%\DungeonsModLoader`).
+
+## Releasing a new version
+
+1. Set `<Version>` in `Directory.Build.props` (the one place the version lives) and commit.
+2. Run `.\build.ps1` and test `dist\DungeonsModLoader-Setup-<version>.exe` (fresh install and update over the
+   previous version).
+3. Tag and publish a GitHub release with the installer attached, for example:
+
+   ```powershell
+   git tag v0.2.0
+   git push origin main --tags
+   gh release create v0.2.0 dist\DungeonsModLoader-Setup-0.2.0.exe dist\DungeonsModLoader-Setup-0.2.0.exe.sha256 --title "DungeonsModLoader 0.2.0" --notes "What changed..."
+   ```
+
+The app's **self-update** reads the latest release of `Boosterfrank/DungeonsModLoader` through the GitHub API
+(`releases/latest`) when it starts (at most once a day, can be turned off in Settings) and on demand from
+Settings > About. Drafts and pre-releases are ignored; the release's tag (`v0.2.0`) is compared with the running
+version and the attached `DungeonsModLoader-Setup-*.exe` is the download. A newer version shows a banner with
+"What's new" and "Update now": the installer is downloaded to the app's `downloads\` folder (size-checked) and run
+silently; the app closes and the installer brings the new version back up.
+
 ## Solution layout
 
 ```
 DungeonsModLoader.sln
+build.ps1                     Tests -> publish -> installer (see "Build the installer")
 src/
   DungeonsModLoader.App/      WPF app: Views, ViewModels, Themes, Controls, App.xaml
-  DungeonsModLoader.Core/     Models, mod store, install/update/profile services, game detection (no WPF)
-  DungeonsModLoader.Nexus/    Nexus Mods API client, SSO, nxm:// link parsing, DTOs
+  DungeonsModLoader.Core/     Models, mod store, install/update/profile services, game detection, app updates (no WPF)
+  DungeonsModLoader.Nexus/    Nexus Mods API client, SSO, nxm:// link parsing, downloads, DTOs
 tests/
   DungeonsModLoader.Core.Tests/
 installer/
-  setup.iss                   Inno Setup script (milestone 7)
+  setup.iss                   Inno Setup script
 ```
 
 ## How mods are stored
