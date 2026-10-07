@@ -1,0 +1,51 @@
+[center][size=5][b]DungeonsModLoader[/b][/size]
+[size=3]A free, open-source mod manager for Minecraft Dungeons II with Nexus Mods built in.[/size][/center]
+
+Browse this Nexus Mods section from inside the app, install a mod with one click, switch mods on and off, keep sets of mods as profiles and get told when a mod has an update. Mods you installed by hand are picked up automatically. Nothing in the game's own files is ever touched.
+
+[size=4][b]Features[/b][/size]
+[list]
+[*][b]Nexus Mods inside the app[/b] – Trending, latest, recently updated and search, with the full mod page (description, files, requirements). Works without an account for browsing.
+[*][b]One-click install[/b] – Install from the mod page or from any [b]Mod Manager Download[/b] / [b]Slow download[/b] button on this website (the app handles nxm:// links). Premium members download straight into the app.
+[*][b]Enable / disable[/b] – a switch per mod. Disabled mods are moved out of the Paks folder, so the game ignores them, and come back untouched.
+[*][b]Profiles[/b] – named sets of enabled mods. Switch between them, duplicate, export and import them as small files to share your setup.
+[*][b]Updates[/b] – installed Nexus mods are checked against their file list; one click updates in place and keeps the last two versions as backups.
+[*][b]Hints[/b] – shows when a mod needs another mod you don't have (and takes you there), and when two enabled mods contain files with the same name.
+[*][b]Hand-installed mods[/b] – anything you drop into [i]~mods[/i] yourself shows up in the list and can be toggled too. Nothing is deleted.
+[*][b]Install from files[/b] – drag a .zip / .7z / .rar or loose .pak files onto the window.
+[*][b]Steam and Xbox app / Minecraft Launcher[/b] installs are both detected, with a Play button that launches the right one.
+[*][b]Keeps itself up to date[/b] – new versions are offered in the app.
+[/list]
+
+[size=4][b]Installation[/b][/size]
+[list=1]
+[*]Download [b]DungeonsModLoader-Setup-x.y.z.exe[/b] from the Files tab and run it. It installs for your Windows user only (no admin rights) and needs no separate .NET runtime.
+[*]Windows SmartScreen may show "Windows protected your PC" because the installer is not code-signed yet. Click [b]More info[/b], then [b]Run anyway[/b]. You can check the download against the .sha256 file.
+[*]The first start finds your game. Pick the install if it finds more than one.
+[*]Tick "Open nxm:// links with DungeonsModLoader" in the setup to use the download buttons on this website. You can change this any time in Settings (and switch back to another manager).
+[/list]
+
+[size=4][b]Downloading mods[/b][/size]
+Browsing works without an account. To download, connect your Nexus Mods account once: the app opens your API keys page, you copy the [b]Personal API Key[/b] and paste it in. The key is stored encrypted for your Windows account and only ever sent to the Nexus Mods API.
+
+Free accounts: the app opens the file's download page here, you click [b]Slow download[/b], and the download comes back into the app and installs on its own. Premium accounts download directly in the app.
+
+[size=4][b]Requirements[/b][/size]
+[list]
+[*]Windows 10 (version 1809) or Windows 11, 64-bit
+[*]Minecraft Dungeons II (Steam, Xbox app or Minecraft Launcher)
+[/list]
+
+[size=4][b]Where things are[/b][/size]
+[list]
+[*]Enabled mods: [i]<game>\Dungeons\Content\Paks\~mods\<ModName>\[/i]
+[*]Disabled mods: [i]<game>\Dungeons\DungeonsModLoader_Disabled\<ModName>\[/i]
+[*]App data (settings, profiles, backups, logs): [i]%LOCALAPPDATA%\DungeonsModLoader\[/i]
+[/list]
+Uninstalling the app never removes your mods.
+
+[size=4][b]Source code, bugs and ideas[/b][/size]
+The app is open source under the MIT licence: [url=https://github.com/Boosterfrank/DungeonsModLoader]github.com/Boosterfrank/DungeonsModLoader[/url]. Bug reports and feature requests are welcome in the Bugs and Posts tabs or as GitHub issues. When reporting a problem, the log in [i]%LOCALAPPDATA%\DungeonsModLoader\logs[/i] helps a lot (your API key never appears in it).
+
+[size=4][b]Credits[/b][/size]
+Built with .NET 8 and WPF. Fonts: Pixelify Sans and Inter (SIL Open Font License). Uses the official Nexus Mods API. Not affiliated with Mojang or Microsoft.
