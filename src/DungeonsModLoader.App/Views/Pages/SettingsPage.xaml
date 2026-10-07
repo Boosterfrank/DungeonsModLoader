@@ -1,7 +1,6 @@
 <UserControl x:Class="DungeonsModLoader.App.Views.Pages.SettingsPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:controls="clr-namespace:DungeonsModLoader.App.Controls"
              xmlns:core="clr-namespace:DungeonsModLoader.Core;assembly=DungeonsModLoader.Core">
   <!-- DataContext: SettingsViewModel. Cards: Game, Nexus Mods account, Nexus links, About. -->
   <UserControl.Resources>
@@ -16,44 +15,6 @@
         <Setter Property="HorizontalAlignment" Value="Left" />
         <Setter Property="Margin" Value="0,0,0,16" />
       </Style>
-
-      <!--
-        Personal API key editor: hidden PasswordBox (bridged to the view model in code-behind, since Password is
-        not bindable) or a plain TextBox when "Show" is ticked, the "Get my key" link, "Verify & save" and the
-        spec's privacy note. Used directly, or inside the "Advanced" expander once SSO is available.
-      -->
-      <DataTemplate x:Key="Settings.ApiKeyEditor">
-        <StackPanel>
-          <TextBlock Style="{StaticResource Text.Label}" Text="PERSONAL API KEY" Margin="0,0,0,6" />
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <PasswordBox Grid.Column="0"
-                         controls:TextBoxHelper.Placeholder="Paste your API key"
-                         Loaded="OnKeyBoxLoaded"
-                         PasswordChanged="OnKeyBoxPasswordChanged"
-                         Visibility="{Binding ShowApiKey, Converter={StaticResource Converter.BoolToVisibility.Inverse}}"
-                         AutomationProperties.Name="API key" />
-            <TextBox Grid.Column="0"
-                     controls:TextBoxHelper.Placeholder="Paste your API key"
-                     Text="{Binding ApiKeyInput, UpdateSourceTrigger=PropertyChanged}"
-                     Visibility="{Binding ShowApiKey, Converter={StaticResource Converter.BoolToVisibility}}"
-                     AutomationProperties.Name="API key (visible)" />
-            <CheckBox Grid.Column="1" Content="Show" Margin="12,0,0,0" VerticalAlignment="Center" IsChecked="{Binding ShowApiKey, Mode=TwoWay}" />
-            <Button Grid.Column="2" Style="{DynamicResource Button.Primary}" Content="Verify &amp; save" Margin="12,0,0,0" Command="{Binding LoginWithKeyCommand}" />
-          </Grid>
-          <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-            <TextBlock Style="{StaticResource Text.Small}" VerticalAlignment="Center">
-              <Hyperlink Command="{Binding OpenApiKeyPageCommand}">Get my key</Hyperlink>
-              <Run Text=" on the Nexus Mods API Access page (personal keys are for personal use and testing)." />
-            </TextBlock>
-          </StackPanel>
-          <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Muted}" Text="{Binding NexusKeyInfoText}" TextWrapping="Wrap" Margin="0,8,0,0" />
-        </StackPanel>
-      </DataTemplate>
     </ResourceDictionary>
   </UserControl.Resources>
 
@@ -141,7 +102,7 @@
               </Border>
             </Grid>
 
-            <!-- Connected: who, membership, actions -->
+            <!-- Connected: who, membership, how downloads work, actions -->
             <StackPanel Margin="0,16,0,0" Visibility="{Binding ShowNexusAccount, Converter={StaticResource Converter.BoolToVisibility}}">
               <StackPanel Orientation="Horizontal">
                 <TextBlock Style="{StaticResource Text.Body}" FontWeight="SemiBold" Text="{Binding NexusUserName}" VerticalAlignment="Center" />
@@ -159,28 +120,29 @@
                   <TextBlock Text="{Binding NexusMembership}" />
                 </Border>
               </StackPanel>
-              <TextBlock Style="{StaticResource Text.Small}" Margin="0,6,0,0" TextWrapping="Wrap"
-                         Text="Premium members download inside the app. Free accounts start downloads with the &quot;Mod Manager Download&quot; button on Nexus Mods, which opens here when the link handler below is on." />
+              <TextBlock Style="{StaticResource Text.Small}" Margin="0,8,0,0" TextWrapping="Wrap" Text="{Binding DownloadSetupText}" />
+              <TextBlock Style="{StaticResource Text.Small}" Margin="0,4,0,0"
+                         Visibility="{Binding ShowNxmTurnOnLink, Converter={StaticResource Converter.BoolToVisibility}}">
+                <Hyperlink Command="{Binding EnableNxmHandlerCommand}" AutomationProperties.Name="Turn on nxm link handling">Turn on nxm:// link handling now</Hyperlink>
+              </TextBlock>
               <WrapPanel Margin="0,14,0,-8">
                 <Button Style="{DynamicResource Button.Secondary}" Content="Verify key" Command="{Binding RevalidateNexusCommand}" Margin="0,0,8,8" />
                 <Button Style="{DynamicResource Button.Ghost}" Content="Log out / remove key" Command="{Binding LogoutNexusCommand}" Margin="0,0,8,8" />
               </WrapPanel>
             </StackPanel>
 
-            <!-- Not connected: SSO button (registered builds) and / or the personal key field -->
+            <!-- Not connected: the guided connect dialog (and SSO in registered builds) -->
             <StackPanel Margin="0,16,0,0" Visibility="{Binding ShowNexusAccount, Converter={StaticResource Converter.BoolToVisibility.Inverse}}">
               <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap"
                          Text="Connect your Nexus Mods account to download mods from the Browse page and to get update notices. Browsing works without it." />
-
-              <StackPanel Margin="0,14,0,0" Visibility="{Binding IsSsoAvailable, Converter={StaticResource Converter.BoolToVisibility}}">
-                <Button Style="{DynamicResource Button.Primary}" Content="Log in with Nexus" HorizontalAlignment="Left" Command="{Binding LoginWithSsoCommand}" />
-                <Expander Header="Advanced: use a personal API key" Margin="0,12,0,0" IsExpanded="False">
-                  <ContentControl Content="{Binding}" ContentTemplate="{DynamicResource Settings.ApiKeyEditor}" Margin="0,8,0,0" />
-                </Expander>
-              </StackPanel>
-
-              <ContentControl Content="{Binding}" ContentTemplate="{DynamicResource Settings.ApiKeyEditor}" Margin="0,14,0,0"
-                              Visibility="{Binding ShowKeyFieldDirectly, Converter={StaticResource Converter.BoolToVisibility}}" />
+              <TextBlock Style="{StaticResource Text.Small}" TextWrapping="Wrap" Margin="0,6,0,0"
+                         Text="It takes about a minute: a short guide opens your Nexus Mods account page, you copy your personal API key and paste it in. The key is stored encrypted on this PC only and is never uploaded anywhere except to Nexus Mods itself." />
+              <WrapPanel Margin="0,14,0,-8">
+                <Button Style="{DynamicResource Button.Primary}" Content="Connect Nexus Mods account" Command="{Binding ConnectNexusCommand}" Margin="0,0,8,8"
+                        AutomationProperties.Name="Connect Nexus Mods account" />
+                <Button Style="{DynamicResource Button.Secondary}" Content="Log in with Nexus" Command="{Binding LoginWithSsoCommand}" Margin="0,0,8,8"
+                        Visibility="{Binding IsSsoAvailable, Converter={StaticResource Converter.BoolToVisibility}}" />
+              </WrapPanel>
             </StackPanel>
 
             <!-- Busy / error / confirmation -->

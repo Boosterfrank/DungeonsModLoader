@@ -43,6 +43,22 @@ public sealed class ModEntry
 
     /// <summary>Files inside the mod folder (relative paths with '/' separators) and their SHA-256 hashes.</summary>
     public List<ModFileRecord> Files { get; set; } = new();
+
+    /// <summary>
+    /// Mods this mod requires, as listed on its Nexus page when it was installed or updated. Null means "not
+    /// known" (local mods, or entries written before requirements were recorded); an empty list means "none".
+    /// </summary>
+    public List<ModRequirementRecord>? Requirements { get; set; }
+}
+
+/// <summary>A mod required by an installed mod (from the Nexus requirements list).</summary>
+/// <param name="NexusModId">Nexus id of the required mod; null for off-site requirements, which cannot be checked.</param>
+/// <param name="Name">Name as shown on Nexus.</param>
+/// <param name="Url">Page of the requirement when Nexus gives one.</param>
+/// <param name="Notes">The author's note about the requirement, when any.</param>
+public sealed record ModRequirementRecord(long? NexusModId, string Name, string? Url = null, string? Notes = null)
+{
+    public bool IsExternal => NexusModId is null;
 }
 
 /// <summary>A file inside a mod folder.</summary>

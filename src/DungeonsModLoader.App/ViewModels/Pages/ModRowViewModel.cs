@@ -1,8 +1,35 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DungeonsModLoader.Core.Mods;
 using DungeonsModLoader.Nexus.Updates;
 
 namespace DungeonsModLoader.App.ViewModels.Pages;
+
+/// <summary>A required mod that is missing or disabled, shown as a clickable warning badge under a row.</summary>
+public sealed class DependencyHintViewModel
+{
+    public DependencyHintViewModel(ModDependencyHint hint)
+    {
+        Hint = hint;
+    }
+
+    public ModDependencyHint Hint { get; }
+
+    public string Name => Hint.Requirement.Name;
+
+    public bool IsDisabled => Hint.Status == DependencyStatus.Disabled;
+
+    /// <summary>"Needs Blueprint Loader" / "Needs Blueprint Loader (disabled)".</summary>
+    public string Text => IsDisabled ? $"Needs {Name} (disabled)" : $"Needs {Name}";
+
+    public string ToolTip => IsDisabled
+        ? $"This mod requires {Name}, which is installed but disabled. Click to enable it."
+        : $"This mod requires {Name}, which is not installed. Click to open it on the Browse page.";
+
+    /// <summary>Same requirement and state: the badge does not need to be rebuilt.</summary>
+    public bool Matches(ModDependencyHint other) =>
+        Hint.Requirement.NexusModId == other.Requirement.NexusModId && Hint.Status == other.Status && Hint.Requirement.Name == other.Requirement.Name;
+}
 
 /// <summary>
 /// One row of the Installed list: a managed mod (<see cref="ModInfo"/>) or an unmanaged folder found in
@@ -124,6 +151,69 @@ public sealed partial class ModRowViewModel : ObservableObject
 
     /// <summary>"Update to 1.2" for the badge.</summary>
     public string UpdateText => HasUpdate ? (string.IsNullOrWhiteSpace(UpdateVersion) ? "Update available" : $"Update to {UpdateVersion}") : string.Empty;
+
+    // ----------------------------------------------------------------------------------------------------------
+    // Hints (conflicts, dependencies)
+    // ----------------------------------------------------------------------------------------------------------
+
+    /// <summary>"Conflicts with X" when another enabled mod ships files with the same names; null when none.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasConflict), nameof(HasHints))]
+    private string? _conflictText;
+
+    [ObservableProperty]
+    private string? _conflictToolTip;
+
+    public bool HasConflict => ConflictText is not null;
+
+    /// <summary>Requirements that are missing or disabled (empty when all are met or unknown).</summary>
+    public ObservableCollection<DependencyHintViewModel> DependencyHints { get; } = new();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHints))]
+    private bool _hasDependencyProblems;
+
+    public bool HasHints => HasConflict || HasDependencyProblems;
+
+    /// <summary>Applies the conflict detector's verdict for this mod.</summary>
+    public void RefreshConflicts(IReadOnlyList<ModConflict>? conflicts)
+    {
+        if (conflicts is null || conflicts.Count == 0)
+        {
+            ConflictText = null;
+            ConflictToolTip = null;
+            return;
+        }
+
+        var names = conflicts.Select(c => c.Other.DisplayName).ToList();
+        ConflictText = names.Count == 1 ? $"Conflicts with {names[0]}" : $"Conflicts with {names[0]} and {names.Count - 1} more";
+
+        var nl = Environment.NewLine;
+        ConflictToolTip =
+            "These enabled mods contain files with the same names, so only one of them can take effect:" + nl
+            + string.Join(nl, conflicts.Select(c => $"•  {c.Other.DisplayName}  ({string.Join(", ", c.SharedBaseNames)})"))
+            + nl + nl + "Disable one of them, or look for a compatibility patch on the mod pages.";
+    }
+
+    /// <summary>Applies the dependency check for this mod (only unmet requirements are shown).</summary>
+    public void RefreshDependencies(IReadOnlyList<ModDependencyHint> problems)
+    {
+        var same = problems.Count == DependencyHints.Count && problems.Zip(DependencyHints).All(pair => pair.Second.Matches(pair.First));
+        if (!same)
+        {
+            DependencyHints.Clear();
+            foreach (var problem in problems)
+            {
+                DependencyHints.Add(new DependencyHintViewModel(problem));
+            }
+        }
+
+        HasDependencyProblems = DependencyHints.Count > 0;
+    }
+
+    // ----------------------------------------------------------------------------------------------------------
+    // State
+    // ----------------------------------------------------------------------------------------------------------
 
     /// <summary>True while this row's own move is in flight (its toggle is disabled).</summary>
     [ObservableProperty]

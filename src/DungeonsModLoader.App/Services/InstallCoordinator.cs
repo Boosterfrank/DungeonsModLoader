@@ -32,11 +32,17 @@ public sealed class InstallCoordinator : IInstallCoordinator
     private readonly IDownloadService _downloads;
     private readonly IModUpdateChecker _updates;
     private readonly IWindowService _windows;
+    private readonly INexusConnectPrompt _connect;
+    private readonly INxmProtocolRegistration _nxm;
+    private readonly IToastService _toasts;
     private readonly AppPaths _paths;
     private readonly ILogger<InstallCoordinator> _logger;
 
     /// <summary>1 while an install flow (with its dialogs) is running; a second request meanwhile is refused instead of interleaved.</summary>
     private int _active;
+
+    /// <summary>"Waiting for Nexus Mods..." toast shown after sending a free account to the website; dismissed when the next flow starts.</summary>
+    private ToastViewModel? _waitingToast;
 
     public InstallCoordinator(
         IModInstaller installer,
@@ -50,6 +56,9 @@ public sealed class InstallCoordinator : IInstallCoordinator
         IDownloadService downloads,
         IModUpdateChecker updates,
         IWindowService windows,
+        INexusConnectPrompt connect,
+        INxmProtocolRegistration nxm,
+        IToastService toasts,
         AppPaths paths,
         ILogger<InstallCoordinator> logger)
     {
@@ -64,6 +73,9 @@ public sealed class InstallCoordinator : IInstallCoordinator
         _downloads = downloads;
         _updates = updates;
         _windows = windows;
+        _connect = connect;
+        _nxm = nxm;
+        _toasts = toasts;
         _paths = paths;
         _logger = logger;
     }
@@ -215,7 +227,17 @@ public sealed class InstallCoordinator : IInstallCoordinator
         }
     }
 
-    private bool TryEnter() => Interlocked.CompareExchange(ref _active, 1, 0) == 0;
+    private bool TryEnter()
+    {
+        if (Interlocked.CompareExchange(ref _active, 1, 0) != 0)
+        {
+            return false;
+        }
+
+        // Whatever comes next (the nxm link we were waiting for, or an unrelated install) ends the waiting state.
+        DismissWaitingToast();
+        return true;
+    }
 
     private void Leave() => Interlocked.Exchange(ref _active, 0);
 
@@ -377,11 +399,9 @@ public sealed class InstallCoordinator : IInstallCoordinator
             return;
         }
 
-        if (!_session.HasApiKey)
+        if (!await _connect.EnsureConnectedAsync("This download from the Nexus Mods website needs your account to finish."))
         {
-            await _dialogs.ShowErrorAsync(
-                "Nexus Mods API key needed",
-                "The download link needs your Nexus Mods account. Add your API key on the Settings page, then click \"Mod Manager Download\" on the website again.");
+            _logger.LogInformation("nxm link dropped: no Nexus Mods account connected");
             return;
         }
 
@@ -433,11 +453,10 @@ public sealed class InstallCoordinator : IInstallCoordinator
     /// <summary>Resolves the download location, downloads with progress, then runs the normal install flow.</summary>
     private async Task<ModEntry?> DownloadAndInstallAsync(NexusMod mod, NexusFile file, NxmLink? link, Guid? updateOf)
     {
-        if (!_session.HasApiKey)
+        // No account yet: the connect dialog walks the user through it, then the download simply continues.
+        if (!await _connect.EnsureConnectedAsync("Downloads use your Nexus Mods account."))
         {
-            await _dialogs.ShowErrorAsync(
-                "Nexus Mods API key needed",
-                "Downloads use your Nexus Mods account. Add your API key on the Settings page, then try again. Browsing works without it.");
+            _logger.LogInformation("Download of mod {Mod} file {File} not started: no Nexus Mods account connected", mod.ModId, file.FileId);
             return null;
         }
 
@@ -508,7 +527,8 @@ public sealed class InstallCoordinator : IInstallCoordinator
             file.FileId,
             string.IsNullOrWhiteSpace(file.Version) ? mod.Version : file.Version,
             mod.Author ?? mod.Uploader,
-            mod.ThumbnailUrl ?? mod.PictureUrl);
+            mod.ThumbnailUrl ?? mod.PictureUrl,
+            await TryGetRequirementsAsync(mod.ModId));
 
         var entry = await InstallOneAsync(InstallSource.FromArchive(archivePath), mod.Name, metadata, updateOf);
         if (entry is not null)
@@ -523,21 +543,117 @@ public sealed class InstallCoordinator : IInstallCoordinator
         return entry;
     }
 
-    /// <summary>Free account without a website token: explain and open the file's page.</summary>
+    /// <summary>
+    /// Free account without a website token: make sure the site can send the file here (nxm:// handler), explain
+    /// the two clicks on the website, open the file's download page and show a "waiting" toast. The install itself
+    /// continues when the browser hands the <c>nxm://</c> link to <see cref="HandleNxmLinkAsync"/>.
+    /// </summary>
     private async Task<ModEntry?> SendToWebsiteAsync(NexusMod mod, NexusFile file)
     {
         _logger.LogInformation("Free account: sending the user to the website for mod {Mod} file {File}", mod.ModId, file.FileId);
-        var open = await _dialogs.ConfirmAsync(
-            "Download on Nexus Mods",
-            "Free Nexus Mods accounts start downloads on the website: open the mod's Files tab, find the file and click "
-            + $"\"Mod Manager Download\". The download then opens in {AppInfo.DisplayName} (make sure \"Handle nxm:// links\" is on in Settings).",
-            "Open the Files tab");
-        if (open)
+        if (!await EnsureNxmHandlerAsync())
         {
-            _windows.OpenUrl(mod.FilesUrl);
+            return null;
         }
 
+        var nl = Environment.NewLine;
+        var open = await _dialogs.ConfirmAsync(
+            "Finish the download on Nexus Mods",
+            "Free Nexus Mods accounts download through the website. The file's download page opens in your browser:"
+            + nl + nl
+            + "1.  Click \"Slow download\" (or \"Mod Manager Download\" if you see the file list) and wait for the short countdown."
+            + nl
+            + $"2.  If your browser asks, allow it to open {AppInfo.DisplayName}."
+            + nl + nl
+            + "The file then comes back here and the install continues on its own.",
+            "Open the download page");
+        if (!open)
+        {
+            return null;
+        }
+
+        var url = mod.DownloadPageUrl(file.FileId);
+        _windows.OpenUrl(url);
+        ShowWaitingToast(file, url);
         return null;
+    }
+
+    /// <summary>
+    /// The website can only hand files to the app registered for <c>nxm://</c> links. When that is not this app
+    /// (nothing, or another mod manager), asks once and registers (per user, no admin rights). Returns false
+    /// when the user declined or the registration failed.
+    /// </summary>
+    private async Task<bool> EnsureNxmHandlerAsync()
+    {
+        var state = _nxm.GetState();
+        if (state.IsThisApp)
+        {
+            return true;
+        }
+
+        var message = state.IsOtherApp
+            ? $"Another program ({state.HandlerName ?? "another mod manager"}) currently receives \"Mod Manager Download\" links from Nexus Mods. "
+              + $"To download with {AppInfo.DisplayName}, it has to receive them instead. You can switch back any time in Settings."
+            : $"Nexus Mods sends downloads to the app registered for its nxm:// links. {AppInfo.DisplayName} needs to be that app "
+              + "(for your Windows account only, no admin rights). You can turn this off any time in Settings.";
+        var turnOn = await _dialogs.ConfirmAsync("Receive downloads from Nexus Mods?", message, "Turn on and continue");
+        if (!turnOn)
+        {
+            _logger.LogInformation("User declined to register the nxm:// handler; website download not started");
+            return false;
+        }
+
+        try
+        {
+            _nxm.Register();
+            return true;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException or InvalidOperationException)
+        {
+            _logger.LogError(ex, "Registering the nxm:// handler failed");
+            await _dialogs.ShowErrorAsync(
+                "Could not set up the link handler",
+                "Windows did not allow the nxm:// registration, so the website cannot send files here. See the log for details.",
+                ex.ToString());
+            return false;
+        }
+    }
+
+    private void ShowWaitingToast(NexusFile file, string url)
+    {
+        DismissWaitingToast();
+        _waitingToast = _toasts.Show(
+            $"Click \"Slow download\" on the Nexus Mods page that opened. \"{file.Name}\" then installs here on its own.",
+            ToastKind.Info,
+            "Waiting for Nexus Mods...",
+            Timeout.InfiniteTimeSpan,
+            "Open the page again",
+            () => _windows.OpenUrl(url),
+            keepOpenOnAction: true);
+    }
+
+    private void DismissWaitingToast()
+    {
+        if (_waitingToast is { } toast)
+        {
+            _waitingToast = null;
+            _toasts.Dismiss(toast);
+        }
+    }
+
+    /// <summary>The mod's requirement list for the manifest (dependency hints); null when Nexus did not answer.</summary>
+    private async Task<IReadOnlyList<ModRequirementRecord>?> TryGetRequirementsAsync(long modId)
+    {
+        try
+        {
+            var requirements = await _client.GetRequirementsAsync(modId);
+            return requirements.Select(r => new ModRequirementRecord(r.ModId, r.Name, r.Url, r.Notes)).ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug("Requirements of mod {Mod} could not be loaded: {Message}", modId, ex.Message);
+            return null;
+        }
     }
 
     // ---------------------------------------------------------------------------------------------------------------

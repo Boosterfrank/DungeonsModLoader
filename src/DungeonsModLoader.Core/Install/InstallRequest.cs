@@ -19,13 +19,15 @@ public enum ConflictResolution
 }
 
 /// <summary>Where a package came from, recorded in the manifest entry (Nexus ids drive update checks and profile sharing).</summary>
+/// <param name="Requirements">The mod's Nexus requirements; null keeps what the entry had (or "unknown" for a new mod).</param>
 public sealed record ModMetadata(
     ModSource Source,
     long? NexusModId = null,
     long? NexusFileId = null,
     string? Version = null,
     string? Author = null,
-    string? ThumbnailUrl = null)
+    string? ThumbnailUrl = null,
+    IReadOnlyList<ModRequirementRecord>? Requirements = null)
 {
     public static ModMetadata Local { get; } = new(ModSource.Local);
 }

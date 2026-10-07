@@ -1,0 +1,178 @@
+<Window x:Class="DungeonsModLoader.App.Views.Dialogs.NexusConnectDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:DungeonsModLoader.App.Controls"
+        xmlns:vm="clr-namespace:DungeonsModLoader.App.ViewModels.Dialogs"
+        Title="Connect your Nexus Mods account"
+        Width="600" SizeToContent="Height"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="False"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource Brush.Bg.Panel}"
+        Foreground="{StaticResource Brush.Text.Primary}"
+        FontFamily="{StaticResource Font.Body}"
+        FontSize="{StaticResource FontSize.Body}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Loaded="OnLoaded">
+
+  <!--
+    Guided account connection (same anatomy as MessageDialog: borderless, draggable header, body, footer).
+    DataContext: NexusConnectViewModel. The PasswordBox is bridged in code-behind (Password is not bindable).
+  -->
+  <WindowChrome.WindowChrome>
+    <WindowChrome CaptionHeight="0" CornerRadius="0" GlassFrameThickness="0,0,0,1"
+                  ResizeBorderThickness="0" UseAeroCaptionButtons="False" />
+  </WindowChrome.WindowChrome>
+
+  <Window.Resources>
+    <!-- Step number: small accent circle -->
+    <Style x:Key="Connect.StepNumber" TargetType="Border">
+      <Setter Property="Width" Value="26" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="CornerRadius" Value="13" />
+      <Setter Property="Background" Value="{StaticResource Brush.Accent.Faint}" />
+      <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+      <Setter Property="BorderThickness" Value="{StaticResource Thickness.Border.Thin}" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Margin" Value="0,0,14,0" />
+    </Style>
+
+    <!-- Body font on purpose: the pixel display font makes "2" and "8" look alike at this size. -->
+    <Style x:Key="Connect.StepNumberText" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource Font.Body}" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+      <Setter Property="Foreground" Value="{StaticResource Brush.Accent.Light}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </Window.Resources>
+
+  <Border Background="{StaticResource Brush.Bg.Panel}"
+          BorderBrush="{StaticResource Brush.Border.Strong}"
+          BorderThickness="{StaticResource Thickness.Border.Thin}">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <!-- Header (draggable) -->
+      <Border Grid.Row="0" Background="Transparent" Padding="24,20,24,0" MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Text.H2}" Text="Connect your Nexus Mods account" TextWrapping="Wrap" />
+          <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Reason}" TextWrapping="Wrap" Margin="0,6,0,0"
+                     Visibility="{Binding HasReason, Converter={StaticResource Converter.BoolToVisibility}}" />
+          <TextBlock Style="{StaticResource Text.Secondary}" TextWrapping="Wrap" Margin="0,6,0,0"
+                     Text="This takes about a minute and only needs to be done once. Browsing mods works without an account." />
+        </StackPanel>
+      </Border>
+
+      <!-- Body: the three steps -->
+      <StackPanel Grid.Row="1" Margin="24,18,24,20">
+
+        <!-- SSO (registered builds only) -->
+        <StackPanel Margin="0,0,0,16" Visibility="{Binding IsSsoAvailable, Converter={StaticResource Converter.BoolToVisibility}}">
+          <Button Style="{DynamicResource Button.Primary}" Content="Log in with Nexus" HorizontalAlignment="Left" Command="{Binding LoginWithSsoCommand}" />
+          <TextBlock Style="{StaticResource Text.Small}" Text="Or use a personal API key:" Margin="0,12,0,0" />
+        </StackPanel>
+
+        <!-- Step 1 -->
+        <Grid Margin="0,0,0,16">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" Style="{StaticResource Connect.StepNumber}">
+            <TextBlock Style="{StaticResource Connect.StepNumberText}" Text="1" />
+          </Border>
+          <StackPanel Grid.Column="1">
+            <TextBlock Style="{StaticResource Text.Body}" FontWeight="SemiBold" Text="{x:Static vm:NexusConnectViewModel.Step1Title}" TextWrapping="Wrap" Margin="0,3,0,0" />
+            <Button Style="{DynamicResource Button.Secondary}" Content="Open the API keys page" HorizontalAlignment="Left" Margin="0,10,0,0"
+                    Command="{Binding OpenApiKeyPageCommand}" AutomationProperties.Name="Open the API keys page" />
+            <TextBlock Style="{StaticResource Text.Small}" Text="{x:Static vm:NexusConnectViewModel.Step1Hint}" TextWrapping="Wrap" Margin="0,8,0,0" />
+          </StackPanel>
+        </Grid>
+
+        <!-- Step 2 -->
+        <Grid Margin="0,0,0,16">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" Style="{StaticResource Connect.StepNumber}">
+            <TextBlock Style="{StaticResource Connect.StepNumberText}" Text="2" />
+          </Border>
+          <StackPanel Grid.Column="1">
+            <TextBlock Style="{StaticResource Text.Body}" FontWeight="SemiBold" Text="{x:Static vm:NexusConnectViewModel.Step2Title}" TextWrapping="Wrap" Margin="0,3,0,0" />
+            <TextBlock Style="{StaticResource Text.Small}" Text="{x:Static vm:NexusConnectViewModel.Step2Hint}" TextWrapping="Wrap" Margin="0,6,0,0" />
+          </StackPanel>
+        </Grid>
+
+        <!-- Step 3 -->
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" Style="{StaticResource Connect.StepNumber}">
+            <TextBlock Style="{StaticResource Connect.StepNumberText}" Text="3" />
+          </Border>
+          <StackPanel Grid.Column="1">
+            <TextBlock Style="{StaticResource Text.Body}" FontWeight="SemiBold" Text="{x:Static vm:NexusConnectViewModel.Step3Title}" TextWrapping="Wrap" Margin="0,3,0,0" />
+            <Grid Margin="0,10,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <PasswordBox x:Name="KeyBox" Grid.Column="0"
+                           controls:TextBoxHelper.Placeholder="Paste your API key"
+                           PasswordChanged="OnKeyBoxPasswordChanged"
+                           Visibility="{Binding ShowApiKey, Converter={StaticResource Converter.BoolToVisibility.Inverse}}"
+                           AutomationProperties.Name="API key" />
+              <TextBox x:Name="KeyText" Grid.Column="0"
+                       controls:TextBoxHelper.Placeholder="Paste your API key"
+                       Text="{Binding ApiKeyInput, UpdateSourceTrigger=PropertyChanged}"
+                       Visibility="{Binding ShowApiKey, Converter={StaticResource Converter.BoolToVisibility}}"
+                       AutomationProperties.Name="API key (visible)" />
+              <Button Grid.Column="1" Style="{DynamicResource Button.Secondary}" Content="Paste" Margin="10,0,0,0" MinWidth="0" Padding="16,0"
+                      Command="{Binding PasteCommand}" ToolTip="Puts the text on the clipboard into the field" AutomationProperties.Name="Paste" />
+              <CheckBox Grid.Column="2" Content="Show" Margin="12,0,0,0" VerticalAlignment="Center" IsChecked="{Binding ShowApiKey, Mode=TwoWay}" />
+            </Grid>
+
+            <StackPanel Margin="0,10,0,0" Visibility="{Binding IsBusy, Converter={StaticResource Converter.BoolToVisibility}}">
+              <TextBlock Style="{StaticResource Text.Small}" Text="{Binding BusyText}" Margin="0,0,0,6" />
+              <ProgressBar IsIndeterminate="True" />
+            </StackPanel>
+            <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Danger}" Text="{Binding Error}" TextWrapping="Wrap" Margin="0,10,0,0"
+                       Visibility="{Binding Error, Converter={StaticResource Converter.NullToVisibility}}" AutomationProperties.Name="Connect error" />
+            <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Muted}" Text="{Binding KeyInfoText}" TextWrapping="Wrap" Margin="0,10,0,0" />
+          </StackPanel>
+        </Grid>
+      </StackPanel>
+
+      <!-- Footer -->
+      <Border Grid.Row="2" Background="{StaticResource Brush.Bg.PanelAlt}"
+              BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0" Padding="24,16">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Muted}" VerticalAlignment="Center" TextWrapping="Wrap"
+                     Text="You can also do this later from the Settings page." Margin="0,0,16,0" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Not now" IsCancel="True" Style="{DynamicResource Button.Secondary}" MinWidth="100" Margin="0,0,8,0"
+                    Command="{Binding CancelCommand}" AutomationProperties.Name="Not now" />
+            <Button Content="Connect" IsDefault="True" Style="{DynamicResource Button.Primary}" MinWidth="110"
+                    Command="{Binding ConnectCommand}" AutomationProperties.Name="Connect" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="3" Height="{StaticResource Size.Extrude}" Background="{StaticResource Brush.Bevel.Dark}" />
+    </Grid>
+  </Border>
+</Window>

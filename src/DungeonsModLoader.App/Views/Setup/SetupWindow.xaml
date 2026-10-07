@@ -345,25 +345,17 @@
             </StackPanel>
           </Border>
 
-          <!-- Not connected -->
+          <!-- Not connected: the guided connect dialog does the work (open key page, copy, paste, verify) -->
           <StackPanel Visibility="{Binding IsNexusConnected, Converter={StaticResource Converter.BoolToVisibility.Inverse}}">
-            <Button Style="{DynamicResource Button.Primary}" Content="Log in with Nexus" HorizontalAlignment="Left" Margin="0,0,0,16"
-                    Command="{Binding LoginWithSsoCommand}"
-                    Visibility="{Binding IsSsoAvailable, Converter={StaticResource Converter.BoolToVisibility}}" />
-            <TextBlock Style="{StaticResource Text.Label}" Text="PERSONAL API KEY" Margin="0,0,0,6" />
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-              </Grid.ColumnDefinitions>
-              <PasswordBox Grid.Column="0" x:Name="ApiKeyBox"
-                           controls:TextBoxHelper.Placeholder="Paste your API key"
-                           PasswordChanged="OnApiKeyPasswordChanged"
-                           AutomationProperties.Name="API key" />
-              <Button Grid.Column="1" Style="{DynamicResource Button.Secondary}" Content="Get my key" Margin="12,0,0,0" Command="{Binding OpenApiKeyPageCommand}"
-                      ToolTip="Opens the Nexus Mods API Access page in your browser" />
-            </Grid>
-            <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Muted}" Text="{Binding NexusKeyInfo}" TextWrapping="Wrap" Margin="0,10,0,0" />
+            <TextBlock Style="{StaticResource Text.Body}" TextWrapping="Wrap"
+                       Text="Connecting takes about a minute: a short guide opens your Nexus Mods account page, you copy your personal API key and paste it in. Downloads and update checks need it; browsing works without it." />
+            <WrapPanel Margin="0,16,0,0">
+              <Button Style="{DynamicResource Button.Primary}" Content="Connect Nexus Mods account" Margin="0,0,8,8" Command="{Binding ConnectNexusCommand}"
+                      AutomationProperties.Name="Connect Nexus Mods account" />
+              <Button Style="{DynamicResource Button.Secondary}" Content="Log in with Nexus" Margin="0,0,8,8" Command="{Binding LoginWithSsoCommand}"
+                      Visibility="{Binding IsSsoAvailable, Converter={StaticResource Converter.BoolToVisibility}}" />
+            </WrapPanel>
+            <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Muted}" Text="{Binding NexusKeyInfo}" TextWrapping="Wrap" Margin="0,6,0,0" />
             <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Danger}" Text="{Binding NexusError}" TextWrapping="Wrap" Margin="0,10,0,0"
                        Visibility="{Binding NexusError, Converter={StaticResource Converter.NullToVisibility}}" />
           </StackPanel>

@@ -53,10 +53,21 @@ public sealed partial class InstalledViewModel : PageViewModel
     private readonly IThumbnailCache _thumbnails;
     private readonly IModUpdateChecker _updates;
     private readonly INexusSession _session;
+    private readonly INexusConnectPrompt _connect;
+    private readonly INexusApiClient _client;
+    private readonly IAppNavigator _navigator;
+    private readonly IToastService _toasts;
     private readonly ILogger<InstalledViewModel> _logger;
 
     /// <summary>Every known row by <see cref="ModRowViewModel.Key"/>, so refreshes reuse instances.</summary>
     private readonly Dictionary<string, ModRowViewModel> _rowsByKey = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Requirements fetched this session for Nexus mods whose manifest entry has none recorded (installed before
+    /// requirements were stored). An empty list also stands for "could not be fetched" so nothing retries in a loop.
+    /// </summary>
+    private readonly Dictionary<long, IReadOnlyList<ModRequirementRecord>> _fetchedRequirements = new();
+    private readonly HashSet<long> _requirementsInFlight = new();
 
     /// <summary>True while the dropdown is being synced from the profile service (a selection change then means nothing).</summary>
     private bool _syncingProfiles;
@@ -75,6 +86,10 @@ public sealed partial class InstalledViewModel : PageViewModel
         IThumbnailCache thumbnails,
         IModUpdateChecker updates,
         INexusSession session,
+        INexusConnectPrompt connect,
+        INexusApiClient client,
+        IAppNavigator navigator,
+        IToastService toasts,
         ILogger<InstalledViewModel> logger)
     {
         _mods = mods;
@@ -89,6 +104,10 @@ public sealed partial class InstalledViewModel : PageViewModel
         _thumbnails = thumbnails;
         _updates = updates;
         _session = session;
+        _connect = connect;
+        _client = client;
+        _navigator = navigator;
+        _toasts = toasts;
         _logger = logger;
 
         _isGameRunning = _monitor.IsGameRunning;
@@ -372,12 +391,26 @@ public sealed partial class InstalledViewModel : PageViewModel
 
     public string UpdateAllText => UpdatesCount == 1 ? "Update 1 mod" : $"Update all ({UpdatesCount})";
 
-    private bool CanCheckForUpdates() => CanMutate && HasNexusKey;
+    /// <summary>At least one installed mod came from Nexus, so update checks make sense.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CheckForUpdatesCommand))]
+    private bool _hasNexusRows;
 
-    /// <summary>"Check for updates": asks Nexus about every installed Nexus mod now (ignores the hourly throttle).</summary>
+    private bool CanCheckForUpdates() => CanMutate && HasNexusRows;
+
+    /// <summary>
+    /// "Check for updates": asks Nexus about every installed Nexus mod now (ignores the hourly throttle). Without
+    /// an account the connect dialog comes first. Results are toasts; only failures are dialogs.
+    /// </summary>
     [RelayCommand(CanExecute = nameof(CanCheckForUpdates))]
-    private Task CheckForUpdatesAsync() =>
-        RunBusyAsync("Checking Nexus Mods for updates...", async () =>
+    private async Task CheckForUpdatesAsync()
+    {
+        if (!await _connect.EnsureConnectedAsync("Update checks use your Nexus Mods account."))
+        {
+            return;
+        }
+
+        await RunBusyAsync("Checking Nexus Mods for updates...", async () =>
         {
             try
             {
@@ -385,16 +418,22 @@ public sealed partial class InstalledViewModel : PageViewModel
                 var nexusMods = Rows.Count(r => r.IsNexus);
                 if (nexusMods == 0)
                 {
-                    await _dialogs.ShowInfoAsync("No Nexus mods", "None of your mods came from Nexus Mods, so there is nothing to check. Mods installed from the Browse page are checked automatically.");
+                    _toasts.Show("None of your mods came from Nexus Mods, so there is nothing to check.", ToastKind.Info, "No Nexus mods");
                 }
                 else if (found.Count == 0)
                 {
-                    await _dialogs.ShowInfoAsync("Up to date", nexusMods == 1 ? "Your Nexus mod is up to date." : $"All {nexusMods} Nexus mods are up to date.");
+                    _toasts.Show(nexusMods == 1 ? "Your Nexus mod is up to date." : $"All {nexusMods} Nexus mods are up to date.", ToastKind.Success, "Up to date");
                 }
                 else
                 {
-                    var names = string.Join(Environment.NewLine, found.Select(u => $"• {_mods.Find(u.ModId)?.Entry.DisplayName ?? "?"} → {u.NewVersion}"));
-                    await _dialogs.ShowInfoAsync(found.Count == 1 ? "1 update available" : $"{found.Count} updates available", names);
+                    var names = string.Join(", ", found.Select(u => $"{_mods.Find(u.ModId)?.Entry.DisplayName ?? "?"} ({u.NewVersion})"));
+                    _toasts.Show(
+                        names,
+                        ToastKind.Info,
+                        found.Count == 1 ? "1 update available" : $"{found.Count} updates available",
+                        TimeSpan.FromSeconds(10),
+                        "Show",
+                        () => Filter = ModFilter.UpdatesAvailable);
                 }
             }
             catch (NexusException ex)
@@ -403,14 +442,20 @@ public sealed partial class InstalledViewModel : PageViewModel
                 await _dialogs.ShowErrorAsync("Could not check for updates", ex.Message, ex.ToString());
             }
         });
+    }
 
-    private bool CanCheckForUpdate(ModRowViewModel? row) => CanMutate && HasNexusKey && row is { IsNexus: true, IsMissing: false };
+    private bool CanCheckForUpdate(ModRowViewModel? row) => CanMutate && row is { IsNexus: true, IsMissing: false };
 
     /// <summary>Context menu "Check for update" for one Nexus mod.</summary>
     [RelayCommand(CanExecute = nameof(CanCheckForUpdate))]
     private async Task CheckForUpdateAsync(ModRowViewModel? row)
     {
         if (row is null)
+        {
+            return;
+        }
+
+        if (!await _connect.EnsureConnectedAsync("Update checks use your Nexus Mods account."))
         {
             return;
         }
@@ -452,7 +497,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         }
     }
 
-    private bool CanUpdate(ModRowViewModel? row) => CanMutate && HasNexusKey && row is { HasUpdate: true };
+    private bool CanUpdate(ModRowViewModel? row) => CanMutate && row is { HasUpdate: true };
 
     /// <summary>Downloads the newer file and replaces the mod in place (name, state and profiles are kept).</summary>
     [RelayCommand(CanExecute = nameof(CanUpdate))]
@@ -470,7 +515,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         });
     }
 
-    private bool CanUpdateAll() => CanMutate && HasNexusKey && UpdatesCount > 0;
+    private bool CanUpdateAll() => CanMutate && UpdatesCount > 0;
 
     [RelayCommand(CanExecute = nameof(CanUpdateAll))]
     private async Task UpdateAllAsync()
@@ -502,6 +547,74 @@ public sealed partial class InstalledViewModel : PageViewModel
         UpdatesCount = Rows.Count(r => r.HasUpdate);
         UpdateCommand.NotifyCanExecuteChanged();
         ApplyFilter();
+    }
+
+    // ----------------------------------------------------------------------------------------------------------
+    // Hints: conflicts and dependencies
+    // ----------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A dependency badge was clicked: a disabled requirement is enabled right here; a missing one opens on the
+    /// Browse page so it can be installed.
+    /// </summary>
+    [RelayCommand]
+    private async Task OpenRequirementAsync(DependencyHintViewModel? hint)
+    {
+        if (hint is null)
+        {
+            return;
+        }
+
+        if (hint.Hint.Status == DependencyStatus.Disabled && hint.Hint.InstalledMod is { } installed)
+        {
+            if (!await EnsureCanMutateAsync())
+            {
+                return;
+            }
+
+            var row = Rows.FirstOrDefault(r => r.IsManaged && r.Id == installed.Id);
+            if (row is not null)
+            {
+                _logger.LogInformation("Enabling required mod {Name} from a dependency hint", row.DisplayName);
+                await ToggleAsync(row, enabled: true);
+            }
+
+            return;
+        }
+
+        if (hint.Hint.Requirement.NexusModId is { } nexusModId)
+        {
+            await _navigator.ShowNexusModAsync(nexusModId);
+        }
+    }
+
+    /// <summary>
+    /// Fetches the requirements of a Nexus mod whose manifest entry has none recorded (public API, cached on disk
+    /// by the client) and refreshes the hints. Failures are remembered as "none" for this session.
+    /// </summary>
+    private async Task FetchRequirementsAsync(long nexusModId)
+    {
+        IReadOnlyList<ModRequirementRecord> records;
+        try
+        {
+            var requirements = await _client.GetRequirementsAsync(nexusModId);
+            records = requirements.Select(r => new ModRequirementRecord(r.ModId, r.Name, r.Url, r.Notes)).ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug("Requirements of Nexus mod {Mod} could not be loaded: {Message}", nexusModId, ex.Message);
+            records = Array.Empty<ModRequirementRecord>();
+        }
+
+        OnUiThread(() =>
+        {
+            _fetchedRequirements[nexusModId] = records;
+            _requirementsInFlight.Remove(nexusModId);
+            if (records.Count > 0)
+            {
+                RebuildRows();
+            }
+        });
     }
 
     // ----------------------------------------------------------------------------------------------------------
@@ -864,6 +977,7 @@ public sealed partial class InstalledViewModel : PageViewModel
 
         var desired = new List<ModRowViewModel>(mods.Count + unmanaged.Count);
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var conflicts = ModConflictDetector.Find(mods);
 
         foreach (var info in mods)
         {
@@ -882,6 +996,17 @@ public sealed partial class InstalledViewModel : PageViewModel
             if (row.ThumbnailUrl is not null && row.ThumbnailPath is null)
             {
                 _ = LoadThumbnailAsync(row);
+            }
+
+            // Hints: conflicts among enabled mods, requirements that are missing or disabled.
+            row.RefreshConflicts(conflicts.TryGetValue(info.Entry.Id, out var rowConflicts) ? rowConflicts : null);
+            var nexusId = info.Entry.Source == ModSource.Nexus ? info.Entry.NexusModId : null;
+            var requirements = info.Entry.Requirements
+                ?? (nexusId is { } id && _fetchedRequirements.TryGetValue(id, out var fetched) ? fetched : null);
+            row.RefreshDependencies(ModDependencyHints.FindProblems(info.Entry, mods, requirements));
+            if (requirements is null && nexusId is { } missingId && !info.IsMissing && _requirementsInFlight.Add(missingId))
+            {
+                _ = FetchRequirementsAsync(missingId);
             }
 
             desired.Add(row);
@@ -940,6 +1065,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         TotalCount = Rows.Count;
         EnabledCount = Rows.Count(row => row.IsUnmanaged || (row.IsEnabled && !row.IsMissing));
         HasAnyRows = Rows.Count > 0;
+        HasNexusRows = Rows.Any(row => row.IsNexus);
     }
 
     private void ApplyFilter()

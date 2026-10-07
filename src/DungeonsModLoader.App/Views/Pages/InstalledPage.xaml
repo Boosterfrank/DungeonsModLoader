@@ -35,6 +35,37 @@
         <Setter Property="Margin" Value="0,4,8,4" />
       </Style>
 
+      <!-- Dependency hint: a warning badge that acts as a button (opens the required mod, or enables it when it is only disabled). -->
+      <Style x:Key="Installed.HintButton" TargetType="Button">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.Warning}" />
+        <Setter Property="Background" Value="{StaticResource Brush.Warning.Faint}" />
+        <Setter Property="FontFamily" Value="{StaticResource Font.Body}" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Caption}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="7,2" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource Radius.Small}"
+                      Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent" SnapsToDevicePixels="True">
+                <ContentPresenter VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Brush.Warning}" />
+                </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                  <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Brush.Cyan}" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
       <!--
         Row context menu (managed rows only). A ContextMenu is not in the visual tree, so the page view model is
         handed over through the row card's Tag and the row itself comes from PlacementTarget.DataContext.
@@ -176,6 +207,29 @@
                 </StackPanel>
               </Grid>
               <TextBlock Style="{StaticResource Text.Small}" Text="{Binding Subtitle}" Margin="0,3,0,0" />
+
+              <!-- Hints: file conflicts with other enabled mods, requirements that are missing or disabled. -->
+              <WrapPanel Margin="0,7,0,-4" Visibility="{Binding HasHints, Converter={StaticResource Converter.BoolToVisibility}}">
+                <Border Style="{DynamicResource Badge.Warning}" Margin="0,0,6,4" ToolTip="{Binding ConflictToolTip}"
+                        Visibility="{Binding HasConflict, Converter={StaticResource Converter.BoolToVisibility}}">
+                  <TextBlock Text="{Binding ConflictText}" />
+                </Border>
+                <ItemsControl ItemsSource="{Binding DependencyHints}" Focusable="False">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <WrapPanel />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <!-- Nested ItemsControl: the page view model sits on the list's ScrollViewer. -->
+                      <Button Style="{StaticResource Installed.HintButton}" Content="{Binding Text}" ToolTip="{Binding ToolTip}" Margin="0,0,6,4"
+                              Command="{Binding DataContext.OpenRequirementCommand, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
+                              CommandParameter="{Binding}" AutomationProperties.Name="{Binding Text}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </WrapPanel>
             </StackPanel>
 
             <Grid Grid.Column="2" VerticalAlignment="Center" Margin="8,0,4,0">
@@ -237,8 +291,15 @@
     </StackPanel>
 
     <!-- ============================ Toolbar ============================ -->
-    <!-- Search | filter chips (wrap when the window is narrow) | profile dropdown | Install from file. Bulk actions live in the footer. -->
+    <!--
+      Row 1: search | profile dropdown | Install from file. Row 2: filter chips (a WrapPanel with the full width, so
+      they wrap instead of being clipped at the 1000px minimum window size). Bulk actions live in the footer.
+    -->
     <Grid Grid.Row="1" Margin="0,20,0,0">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
@@ -246,8 +307,16 @@
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
 
+      <TextBox Grid.Row="0" Grid.Column="0"
+               Style="{DynamicResource TextBox.Search}"
+               Width="240"
+               VerticalAlignment="Top"
+               controls:TextBoxHelper.Placeholder="Search mods..."
+               Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+               AutomationProperties.Name="Search mods" />
+
       <!-- Active profile; picking another one applies it (moves folders) right away. -->
-      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top" Margin="16,0,0,0">
+      <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
         <TextBlock Style="{StaticResource Text.Small}" Text="Profile" VerticalAlignment="Center" Margin="0,0,8,0" />
         <ComboBox Width="170"
                   ItemsSource="{Binding ProfileNames}"
@@ -257,15 +326,16 @@
                   AutomationProperties.Name="Profile" />
       </StackPanel>
 
-      <TextBox Grid.Column="0"
-               Style="{DynamicResource TextBox.Search}"
-               Width="240"
-               VerticalAlignment="Top"
-               controls:TextBoxHelper.Placeholder="Search mods..."
-               Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-               AutomationProperties.Name="Search mods" />
+      <!-- Centred on the 36px search box (28px button, 4px offset). -->
+      <Button Grid.Row="0" Grid.Column="3"
+              Style="{StaticResource Installed.SmallButton}"
+              Content="Install from file..."
+              VerticalAlignment="Top"
+              Margin="16,4,0,0"
+              Command="{Binding InstallFromFileCommand}"
+              ToolTip="Install a mod from a .zip, .7z or .rar archive, or from .pak/.ucas/.utoc files" />
 
-      <WrapPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Top">
+      <WrapPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,8,0,0">
         <RadioButton Style="{StaticResource Installed.Chip}" GroupName="InstalledFilter" Content="All"
                      IsChecked="{Binding IsAllFilter, Mode=TwoWay}" />
         <RadioButton Style="{StaticResource Installed.Chip}" GroupName="InstalledFilter" Content="Enabled"
@@ -275,15 +345,6 @@
         <RadioButton Style="{StaticResource Installed.Chip}" GroupName="InstalledFilter" Content="Updates available"
                      IsChecked="{Binding IsUpdatesFilter, Mode=TwoWay}" />
       </WrapPanel>
-
-      <!-- Centred on the 36px search box (28px button, 4px offset). -->
-      <Button Grid.Column="3"
-              Style="{StaticResource Installed.SmallButton}"
-              Content="Install from file..."
-              VerticalAlignment="Top"
-              Margin="16,4,0,0"
-              Command="{Binding InstallFromFileCommand}"
-              ToolTip="Install a mod from a .zip, .7z or .rar archive, or from .pak/.ucas/.utoc files" />
     </Grid>
 
     <!-- ============================ Game-running banner ============================ -->
@@ -375,8 +436,8 @@
         <StackPanel Grid.Column="1" Orientation="Horizontal"
                     Visibility="{Binding HasAnyRows, Converter={StaticResource Converter.BoolToVisibility}}">
           <Button Style="{StaticResource Installed.SmallGhostButton}" Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" Margin="0,0,8,0"
-                  Visibility="{Binding HasNexusKey, Converter={StaticResource Converter.BoolToVisibility}}"
-                  ToolTip="Ask Nexus Mods for newer files of your Nexus mods" />
+                  Visibility="{Binding HasNexusRows, Converter={StaticResource Converter.BoolToVisibility}}"
+                  ToolTip="Ask Nexus Mods for newer files of your Nexus mods (connects your account first if needed)" />
           <Button Content="{Binding UpdateAllText}" Command="{Binding UpdateAllCommand}" Margin="0,0,8,0"
                   Visibility="{Binding HasUpdates, Converter={StaticResource Converter.BoolToVisibility}}">
             <Button.Style>

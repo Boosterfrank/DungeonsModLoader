@@ -1,6 +1,5 @@
 using System.IO;
 using System.Windows;
-using System.Windows.Interop;
 using System.Windows.Threading;
 using DungeonsModLoader.App.Views.Dialogs;
 using DungeonsModLoader.Core;
@@ -272,45 +271,10 @@ public sealed class DialogService : IDialogService
         });
 
     /// <summary>Shows <paramref name="dialog"/> modally over the active window, or centred on screen with a taskbar entry.</summary>
-    private static void ShowModal(Window dialog)
-    {
-        var owner = FindOwner(dialog);
-        if (owner is not null)
-        {
-            dialog.Owner = owner;
-            dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            dialog.ShowInTaskbar = false;
-        }
-        else
-        {
-            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            dialog.ShowInTaskbar = true;
-        }
-
-        dialog.ShowDialog();
-    }
+    private static void ShowModal(Window dialog) => ModalDialogs.ShowModal(dialog);
 
     /// <summary>The active visible window, else the main window when visible; null when nothing is on screen yet.</summary>
-    private static Window? FindOwner(Window? exclude)
-    {
-        var app = Application.Current;
-        if (app is null)
-        {
-            return null;
-        }
-
-        var active = app.Windows.OfType<Window>()
-            .FirstOrDefault(w => w.IsActive && w.IsVisible && !ReferenceEquals(w, exclude) && HasHandle(w));
-        if (active is not null)
-        {
-            return active;
-        }
-
-        var main = app.MainWindow;
-        return main is { IsVisible: true } && !ReferenceEquals(main, exclude) && HasHandle(main) ? main : null;
-    }
-
-    private static bool HasHandle(Window window) => new WindowInteropHelper(window).Handle != IntPtr.Zero;
+    private static Window? FindOwner(Window? exclude) => ModalDialogs.FindOwner(exclude);
 
     private static Task<T> OnUiThreadAsync<T>(Func<T> action)
     {

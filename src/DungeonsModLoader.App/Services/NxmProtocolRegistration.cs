@@ -12,6 +12,23 @@ namespace DungeonsModLoader.App.Services;
 public sealed record NxmHandlerState(bool IsRegistered, bool IsThisApp, string? Command)
 {
     public bool IsOtherApp => IsRegistered && !IsThisApp;
+
+    /// <summary>"Vortex" from <c>"C:\Program Files\Vortex\Vortex.exe" -d "%1"</c>; null when nothing is registered.</summary>
+    public string? HandlerName
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Command))
+            {
+                return null;
+            }
+
+            var trimmed = Command.Trim();
+            var exe = trimmed.StartsWith('"') ? trimmed[1..].Split('"', 2)[0] : trimmed.Split(' ', 2)[0];
+            var name = Path.GetFileNameWithoutExtension(exe);
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+    }
 }
 
 /// <summary>

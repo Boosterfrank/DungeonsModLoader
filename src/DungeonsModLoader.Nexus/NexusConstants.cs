@@ -38,6 +38,13 @@ public static class NexusConstants
     /// <summary>Files tab of a mod page (where free users click "Mod Manager Download").</summary>
     public static string ModFilesUrl(long modId) => $"{WebsiteBaseUrl}/{GameDomain}/mods/{modId}?tab=files";
 
+    /// <summary>
+    /// Download page of one file in "mod manager" mode (<c>nmm=1</c>): the site skips the file list and shows the
+    /// download buttons for that file right away. Free members click "Slow download" there and the site hands
+    /// the file to the registered <c>nxm://</c> handler.
+    /// </summary>
+    public static string ModFileDownloadPageUrl(long modId, long fileId) => $"{WebsiteBaseUrl}/{GameDomain}/mods/{modId}?tab=files&file_id={fileId}&nmm=1";
+
     /// <summary>Browser page the user approves an SSO login on.</summary>
     public static string SsoPageUrl(Guid connectionId) => $"{WebsiteBaseUrl}/sso?id={connectionId:D}&application={Uri.EscapeDataString(AppSlug)}";
 

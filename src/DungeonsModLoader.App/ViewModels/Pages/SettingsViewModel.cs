@@ -3,6 +3,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DungeonsModLoader.App.Services;
+using DungeonsModLoader.App.ViewModels.Dialogs;
 using DungeonsModLoader.App.ViewModels.Setup;
 using DungeonsModLoader.Core;
 using DungeonsModLoader.Core.Game;
@@ -17,9 +18,8 @@ namespace DungeonsModLoader.App.ViewModels.Pages;
 /// <summary>Settings page: game folder, Nexus Mods account, nxm:// handler, About.</summary>
 public sealed partial class SettingsViewModel : PageViewModel
 {
-    /// <summary>Spec text shown next to the key field.</summary>
-    public const string NexusKeyInfo =
-        "Your key is stored encrypted on this PC only and is never uploaded anywhere except to Nexus Mods itself. Don't share your key with anyone.";
+    /// <summary>Spec text shown next to the key field (the connect dialog owns the field; kept for the wizard).</summary>
+    public const string NexusKeyInfo = NexusConnectViewModel.KeyInfo;
 
     private static readonly TimeSpan ConfirmationDuration = TimeSpan.FromSeconds(5);
 
@@ -31,6 +31,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     private readonly IDialogService _dialogs;
     private readonly IModStoreInitializer _initializer;
     private readonly INexusSession _nexus;
+    private readonly INexusConnectPrompt _connect;
     private readonly INxmProtocolRegistration _nxm;
     private readonly ILogger<SettingsViewModel> _logger;
     private int _confirmationVersion;
@@ -46,6 +47,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         IDialogService dialogs,
         IModStoreInitializer initializer,
         INexusSession nexus,
+        INexusConnectPrompt connect,
         INxmProtocolRegistration nxm,
         ILogger<SettingsViewModel> logger)
     {
@@ -57,6 +59,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         _dialogs = dialogs;
         _initializer = initializer;
         _nexus = nexus;
+        _connect = connect;
         _nxm = nxm;
         _logger = logger;
 
@@ -270,43 +273,32 @@ public sealed partial class SettingsViewModel : PageViewModel
     // Nexus Mods account
     // ------------------------------------------------------------------------------------------------------
 
-    public string NexusKeyInfoText => NexusKeyInfo;
-
-    /// <summary>True in builds where Nexus has issued the app slug: "Log in with Nexus" is offered and the key field moves behind "Advanced".</summary>
+    /// <summary>True in builds where Nexus has issued the app slug: "Log in with Nexus" is offered next to the key dialog.</summary>
     public bool IsSsoAvailable => NexusConstants.IsSsoAvailable;
 
-    public bool ShowKeyFieldDirectly => !IsSsoAvailable;
-
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsNexusLoggedIn), nameof(IsNexusLoggedOut), nameof(IsNexusUnverified), nameof(IsNexusVerifying), nameof(NexusStatusText), nameof(ShowNexusAccount))]
-    [NotifyCanExecuteChangedFor(nameof(LoginWithKeyCommand), nameof(LoginWithSsoCommand), nameof(LogoutNexusCommand), nameof(RevalidateNexusCommand))]
+    [NotifyPropertyChangedFor(nameof(IsNexusLoggedIn), nameof(IsNexusLoggedOut), nameof(IsNexusUnverified), nameof(IsNexusVerifying), nameof(NexusStatusText), nameof(ShowNexusAccount), nameof(DownloadSetupText), nameof(ShowNxmTurnOnLink))]
+    [NotifyCanExecuteChangedFor(nameof(ConnectNexusCommand), nameof(LoginWithSsoCommand), nameof(LogoutNexusCommand), nameof(RevalidateNexusCommand))]
     private NexusSessionStatus _nexusStatus;
 
     [ObservableProperty]
     private string _nexusUserName = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DownloadSetupText), nameof(ShowNxmTurnOnLink))]
     private bool _nexusIsPremium;
 
     [ObservableProperty]
     private string _nexusMembership = string.Empty;
 
-    /// <summary>The key typed by the user (cleared after a successful login; never logged).</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(LoginWithKeyCommand))]
-    private string _apiKeyInput = string.Empty;
-
-    [ObservableProperty]
-    private bool _showApiKey;
-
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(LoginWithKeyCommand), nameof(LoginWithSsoCommand), nameof(LogoutNexusCommand), nameof(RevalidateNexusCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ConnectNexusCommand), nameof(LoginWithSsoCommand), nameof(LogoutNexusCommand), nameof(RevalidateNexusCommand))]
     private bool _isNexusBusy;
 
     [ObservableProperty]
     private string? _nexusBusyText;
 
-    /// <summary>Inline error under the key field; null hides it.</summary>
+    /// <summary>Inline error under the account block; null hides it.</summary>
     [ObservableProperty]
     private string? _nexusError;
 
@@ -332,25 +324,43 @@ public sealed partial class SettingsViewModel : PageViewModel
         _ => "Not connected",
     };
 
-    private bool CanLoginWithKey() => !IsNexusBusy && !string.IsNullOrWhiteSpace(ApiKeyInput);
-
-    /// <summary>"Verify & save": checks the pasted key with Nexus and stores it encrypted.</summary>
-    [RelayCommand(CanExecute = nameof(CanLoginWithKey))]
-    private async Task LoginWithKeyAsync()
+    /// <summary>How downloads work for this account, and whether the link handler still needs turning on.</summary>
+    public string DownloadSetupText
     {
-        var provider = _nexus.Providers.FirstOrDefault(p => p.Method == NexusAuthMethod.PersonalApiKey);
-        if (provider is null)
+        get
         {
-            return;
-        }
+            if (!ShowNexusAccount)
+            {
+                return string.Empty;
+            }
 
-        await RunNexusAsync("Checking the key with Nexus Mods...", async () =>
+            if (NexusIsPremium)
+            {
+                return "Premium membership: downloads run inside the app.";
+            }
+
+            return IsNxmHandler
+                ? "Free account: downloads start on the Nexus Mods website (\"Slow download\" / \"Mod Manager Download\") and land here automatically."
+                : "Free account: downloads start on the Nexus Mods website. For the files to land here, this app has to handle the site's nxm:// links.";
+        }
+    }
+
+    /// <summary>Shows the "Turn on now" link under the download text (free account, handler not pointing here).</summary>
+    public bool ShowNxmTurnOnLink => ShowNexusAccount && !NexusIsPremium && !IsNxmHandler;
+
+    private bool CanConnectNexus() => !IsNexusBusy;
+
+    /// <summary>"Connect Nexus Mods account": the guided dialog (open key page, copy, paste, verify &amp; save).</summary>
+    [RelayCommand(CanExecute = nameof(CanConnectNexus))]
+    private async Task ConnectNexusAsync()
+    {
+        NexusError = null;
+        var connected = await _connect.ShowAsync();
+        RefreshNexus();
+        if (connected)
         {
-            var user = await _nexus.LoginAsync(provider, ApiKeyInput);
-            ApiKeyInput = string.Empty;
-            ShowApiKey = false;
-            _ = ShowNexusConfirmationAsync($"Connected as {user.Name}.");
-        });
+            _ = ShowNexusConfirmationAsync($"Connected as {_nexus.User?.Name ?? "your account"}.");
+        }
     }
 
     private bool CanLoginWithSso() => !IsNexusBusy && IsSsoAvailable;
@@ -413,9 +423,6 @@ public sealed partial class SettingsViewModel : PageViewModel
         });
 
     [RelayCommand]
-    private void OpenApiKeyPage() => _windows.OpenUrl(NexusConstants.ApiKeyPageUrl);
-
-    [RelayCommand]
     private void OpenNexusGamePage() => _windows.OpenUrl($"{NexusConstants.WebsiteBaseUrl}/games/{NexusConstants.GameDomain}");
 
     private async Task RunNexusAsync(string busyText, Func<Task> work)
@@ -438,7 +445,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
         catch (NexusException ex)
         {
-            // Phrased for the user by the Nexus layer ("That does not look like a key", "rejected", "offline").
+            // Phrased for the user by the Nexus layer ("rejected", "offline").
             _logger.LogWarning("Nexus account action failed: {Message}", ex.Message);
             NexusError = ex.Message;
         }
@@ -487,6 +494,7 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     /// <summary>Bound to the toggle; changing it registers / unregisters the handler right away.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DownloadSetupText), nameof(ShowNxmTurnOnLink))]
     private bool _isNxmHandler;
 
     [ObservableProperty]
@@ -519,6 +527,10 @@ public sealed partial class SettingsViewModel : PageViewModel
         RefreshNxmHandler();
     }
 
+    /// <summary>The "Turn on now" link in the account card.</summary>
+    [RelayCommand]
+    private void EnableNxmHandler() => IsNxmHandler = true;
+
     private void RefreshNxmHandler()
     {
         var state = _nxm.GetState();
@@ -533,10 +545,10 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
 
         NxmHandlerHint = state.IsThisApp
-            ? "\"Mod Manager Download\" buttons on Nexus Mods open in this app."
+            ? "\"Mod Manager Download\" and \"Slow download\" buttons on Nexus Mods send files to this app."
             : state.IsOtherApp
-                ? "Another program currently handles nxm:// links. Turning this on takes them over for your account."
-                : "Lets the \"Mod Manager Download\" buttons on Nexus Mods send files to this app (free accounts download this way).";
+                ? $"{state.HandlerName ?? "Another program"} currently handles nxm:// links. Turning this on lets {AppInfo.DisplayName} receive them instead (for your Windows account only; turn it off to hand them back)."
+                : "Lets the \"Mod Manager Download\" and \"Slow download\" buttons on Nexus Mods send files to this app (free accounts download this way).";
     }
 
     // ------------------------------------------------------------------------------------------------------

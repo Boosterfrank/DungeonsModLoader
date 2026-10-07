@@ -25,6 +25,9 @@ public sealed record NexusMod(
 
     public string FilesUrl => NexusConstants.ModFilesUrl(ModId);
 
+    /// <summary>The website's download page for one of this mod's files (see <see cref="NexusConstants.ModFileDownloadPageUrl"/>).</summary>
+    public string DownloadPageUrl(long fileId) => NexusConstants.ModFileDownloadPageUrl(ModId, fileId);
+
     /// <summary>Returns a copy with the long description filled in (lists do not carry it).</summary>
     public NexusMod WithDescription(string? description) => this with { Description = description };
 }

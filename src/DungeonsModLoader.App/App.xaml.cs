@@ -218,6 +218,14 @@ public partial class App : Application
             if (found.Count > 0)
             {
                 _log.Information("Startup update check: {Count} update(s) available", found.Count);
+                var navigator = services.GetRequiredService<IAppNavigator>();
+                services.GetRequiredService<IToastService>().Show(
+                    found.Count == 1 ? "One of your Nexus mods has a newer version." : $"{found.Count} of your Nexus mods have newer versions.",
+                    ToastKind.Info,
+                    "Updates available",
+                    TimeSpan.FromSeconds(12),
+                    "Show",
+                    () => navigator.ShowInstalled(ViewModels.Pages.ModFilter.UpdatesAvailable));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -226,7 +234,14 @@ public partial class App : Application
             _log.Warning("Startup update check skipped: {Message}", ex.Message);
         }
 
-        await HandleArgumentsAsync(args);
+        try
+        {
+            await HandleArgumentsAsync(args);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.Error(ex, "Handling the command-line arguments failed");
+        }
     }
 
     /// <summary>Acts on command-line arguments (startup or forwarded from a later launch): nxm:// links are installed.</summary>

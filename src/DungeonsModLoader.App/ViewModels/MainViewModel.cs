@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -28,6 +29,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IModStoreInitializer _initializer;
     private readonly IInstallCoordinator _installs;
     private readonly IDialogService _dialogs;
+    private readonly IToastService _toasts;
     private readonly ILogger<MainViewModel> _logger;
 
     /// <summary>Incremented per status message so a delayed clear only removes the message it was scheduled for.</summary>
@@ -45,6 +47,7 @@ public sealed partial class MainViewModel : ObservableObject
         IModStoreInitializer initializer,
         IInstallCoordinator installs,
         IDialogService dialogs,
+        IToastService toasts,
         ILogger<MainViewModel> logger)
     {
         Installed = installed;
@@ -58,6 +61,7 @@ public sealed partial class MainViewModel : ObservableObject
         _initializer = initializer;
         _installs = installs;
         _dialogs = dialogs;
+        _toasts = toasts;
         _logger = logger;
 
         _currentPage = installed;
@@ -75,6 +79,9 @@ public sealed partial class MainViewModel : ObservableObject
     public BrowseViewModel Browse { get; }
     public ProfilesViewModel Profiles { get; }
     public SettingsViewModel Settings { get; }
+
+    /// <summary>Bottom-right notifications ("Installed X", "Waiting for Nexus Mods..."), bound by the window.</summary>
+    public ReadOnlyObservableCollection<ToastViewModel> Toasts => _toasts.Toasts;
 
     /// <summary>The page shown in the content area. Never null; defaults to <see cref="Installed"/>.</summary>
     [ObservableProperty]
@@ -121,7 +128,7 @@ public sealed partial class MainViewModel : ObservableObject
             var installed = await _installs.InstallFromPathsAsync(list);
             if (installed.Count > 1)
             {
-                SetStatus($"Installed {installed.Count} mods", autoClear: true);
+                _toasts.Show($"Installed {installed.Count} mods", ToastKind.Success);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -242,9 +249,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void OnGameRunningChanged(object? sender, bool running) => OnUiThread(() => IsGameRunning = running);
 
-    private void OnModInstalled(object? sender, ModEntry entry) => OnUiThread(() => SetStatus($"Installed {entry.DisplayName}", autoClear: true));
+    private void OnModInstalled(object? sender, ModEntry entry) =>
+        _toasts.Show($"Installed {entry.DisplayName}", ToastKind.Success);
 
-    private void OnModUpdated(object? sender, ModEntry entry) => OnUiThread(() => SetStatus($"Updated {entry.DisplayName}{(string.IsNullOrWhiteSpace(entry.Version) ? string.Empty : " to v" + entry.Version)}", autoClear: true));
+    private void OnModUpdated(object? sender, ModEntry entry) =>
+        _toasts.Show($"Updated {entry.DisplayName}{(string.IsNullOrWhiteSpace(entry.Version) ? string.Empty : " to v" + entry.Version)}", ToastKind.Success);
 
     private void ApplyGameContext()
     {

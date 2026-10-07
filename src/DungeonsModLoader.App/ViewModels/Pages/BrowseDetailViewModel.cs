@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DungeonsModLoader.App.ViewModels.Pages;
 
-/// <summary>A file of the mod in the detail panel, with its Install / Update / Installed button.</summary>
+/// <summary>A file of the mod on the detail page, with its Install / Update / Reinstall button.</summary>
 public sealed partial class BrowseFileViewModel : ObservableObject
 {
     public BrowseFileViewModel(NexusFile file)
@@ -78,6 +78,9 @@ public sealed partial class BrowseRequirementViewModel : ObservableObject
 
     public bool IsExternal => Requirement.IsExternal;
 
+    /// <summary>Nexus requirements open inside the app; off-site ones open in the browser.</summary>
+    public string OpenHint => Requirement.ModId is not null ? "Show this mod" : "Open in your browser";
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StatusText), nameof(IsSatisfied), nameof(IsWarning))]
     private bool _isInstalled;
@@ -107,9 +110,17 @@ public sealed partial class BrowseRequirementViewModel : ObservableObject
     }
 }
 
+/// <summary>Sections of the detail page.</summary>
+public enum DetailTab
+{
+    Description,
+    Files,
+    Requirements,
+}
+
 /// <summary>
-/// The detail panel of the Browse page: description (BBCode), requirements and the file list with Install
-/// buttons. Loads its three parts independently so one failing request does not blank the others.
+/// The full-page detail of a mod on the Browse page: hero picture, title and actions, then Description / Files /
+/// Requirements tabs. Loads its parts independently so one failing request does not blank the others.
 /// </summary>
 public sealed partial class BrowseDetailViewModel : ObservableObject
 {
@@ -120,9 +131,12 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
     private readonly IInstallCoordinator _installs;
     private readonly IWindowService _windows;
     private readonly IThumbnailCache _thumbnails;
+    private readonly Func<long, Task> _openMod;
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _lifetime = new();
+    private NexusModUpdate? _pendingUpdate;
 
+    /// <param name="openMod">Opens another mod's detail page (requirements link to it).</param>
     public BrowseDetailViewModel(
         NexusMod mod,
         INexusApiClient client,
@@ -132,6 +146,7 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
         IInstallCoordinator installs,
         IWindowService windows,
         IThumbnailCache thumbnails,
+        Func<long, Task> openMod,
         ILogger logger)
     {
         Mod = mod;
@@ -142,6 +157,7 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
         _installs = installs;
         _windows = windows;
         _thumbnails = thumbnails;
+        _openMod = openMod;
         _logger = logger;
 
         Author = string.IsNullOrWhiteSpace(mod.Author) ? mod.Uploader ?? "Unknown author" : mod.Author;
@@ -166,6 +182,58 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
 
     public ObservableCollection<BrowseRequirementViewModel> Requirements { get; } = new();
 
+    // ------------------------------------------------------------------------------------------------------
+    // Tabs
+    // ------------------------------------------------------------------------------------------------------
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDescriptionTab), nameof(IsFilesTab), nameof(IsRequirementsTab))]
+    private DetailTab _tab = DetailTab.Description;
+
+    public bool IsDescriptionTab
+    {
+        get => Tab == DetailTab.Description;
+        set => SelectTab(value, DetailTab.Description);
+    }
+
+    public bool IsFilesTab
+    {
+        get => Tab == DetailTab.Files;
+        set => SelectTab(value, DetailTab.Files);
+    }
+
+    public bool IsRequirementsTab
+    {
+        get => Tab == DetailTab.Requirements;
+        set => SelectTab(value, DetailTab.Requirements);
+    }
+
+    private void SelectTab(bool selected, DetailTab tab)
+    {
+        if (selected)
+        {
+            Tab = tab;
+        }
+    }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FilesTabTitle))]
+    private int _fileCount;
+
+    public string FilesTabTitle => FileCount == 0 ? "Files" : $"Files ({FileCount})";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRequirements), nameof(RequirementsTabTitle))]
+    private int _requirementCount;
+
+    public bool HasRequirements => RequirementCount > 0;
+
+    public string RequirementsTabTitle => RequirementCount == 0 ? "Requirements" : $"Requirements ({RequirementCount})";
+
+    // ------------------------------------------------------------------------------------------------------
+    // Content state
+    // ------------------------------------------------------------------------------------------------------
+
     [ObservableProperty]
     private string? _description;
 
@@ -185,14 +253,13 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
     private string? _descriptionError;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPicture))]
     private string? _picturePath;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasRequirements))]
-    private int _requirementCount;
+    public bool HasPicture => PicturePath is not null;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(InstalledText), nameof(ShowInstalled))]
+    [NotifyPropertyChangedFor(nameof(InstalledText), nameof(ShowInstalled), nameof(ShowPrimaryAction), nameof(PrimaryActionText), nameof(PrimaryActionToolTip))]
     private bool _isInstalled;
 
     [ObservableProperty]
@@ -200,27 +267,43 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
     private string? _installedVersion;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(InstalledText), nameof(ShowInstalled))]
+    [NotifyPropertyChangedFor(nameof(InstalledText), nameof(ShowInstalled), nameof(ShowPrimaryAction), nameof(PrimaryActionText), nameof(PrimaryActionToolTip))]
     private bool _hasUpdate;
 
     [ObservableProperty]
-    private bool _hasFiles;
+    [NotifyPropertyChangedFor(nameof(PrimaryActionToolTip))]
+    private string? _updateVersion;
 
-    /// <summary>What the download will do when the user has no key / is a free member (shown above the files).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowPrimaryAction))]
+    private bool _hasMainFile;
+
+    /// <summary>What the download will do for this account (no key / free member); null when nothing to say.</summary>
     [ObservableProperty]
     private string? _downloadHint;
-
-    public bool HasRequirements => RequirementCount > 0;
 
     public bool ShowInstalled => IsInstalled;
 
     public string InstalledText => !IsInstalled
         ? string.Empty
         : HasUpdate
-            ? $"Installed ({InstalledVersion ?? "unknown version"}) · update available"
-            : $"Installed ({InstalledVersion ?? "unknown version"})";
+            ? $"Installed {InstalledVersion ?? ""} · update available".Replace("  ", " ")
+            : $"Installed {InstalledVersion ?? ""}".TrimEnd();
 
-    /// <summary>Loads description, files and requirements; call once after construction.</summary>
+    /// <summary>The one gold button: "Install" for new mods, "Update" when a newer file is known; hidden when installed and current.</summary>
+    public bool ShowPrimaryAction => HasUpdate || (!IsInstalled && HasMainFile);
+
+    public string PrimaryActionText => HasUpdate ? "Update" : "Install";
+
+    public string PrimaryActionToolTip => HasUpdate
+        ? $"Download {UpdateVersion ?? "the newer file"} and replace the installed files (name, state and profiles are kept)"
+        : "Download and install the main file";
+
+    // ------------------------------------------------------------------------------------------------------
+    // Loading
+    // ------------------------------------------------------------------------------------------------------
+
+    /// <summary>Loads picture, description, files and requirements; call once after construction.</summary>
     public async Task LoadAsync()
     {
         var token = _lifetime.Token;
@@ -287,9 +370,8 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
                 FileGroups.Add(new BrowseFileGroupViewModel(Title(group.Key), files));
             }
 
-            HasFiles = FileGroups.Count > 0;
-            FilesError = HasFiles ? null : "This mod has no downloadable files right now.";
-            OnPropertyChanged(nameof(HasMainFile));
+            FileCount = FileGroups.Sum(g => g.Files.Count);
+            FilesError = FileCount > 0 ? null : "This mod has no downloadable files right now.";
             RefreshState();
         }
         catch (OperationCanceledException)
@@ -340,14 +422,16 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
     {
         var installed = _mods.Mods.FirstOrDefault(m => m.Entry.Source == ModSource.Nexus && m.Entry.NexusModId == Mod.ModId);
         IsInstalled = installed is not null;
-        InstalledVersion = installed?.Entry.Version;
-        var update = installed is not null && _updates.Updates.TryGetValue(installed.Entry.Id, out var pending) ? pending : null;
-        HasUpdate = update is not null;
+        InstalledVersion = installed?.Entry.Version is { Length: > 0 } v ? "v" + v : null;
+        _pendingUpdate = installed is not null && _updates.Updates.TryGetValue(installed.Entry.Id, out var pending) ? pending : null;
+        HasUpdate = _pendingUpdate is not null;
+        UpdateVersion = _pendingUpdate?.NewVersion;
+        HasMainFile = FileGroups.SelectMany(g => g.Files).Any(f => f.File.Category == NexusFileCategory.Main);
 
         foreach (var file in FileGroups.SelectMany(g => g.Files))
         {
             file.IsInstalledFile = installed?.Entry.NexusFileId == file.File.FileId;
-            file.IsUpdateTarget = update?.NewFile.FileId == file.File.FileId;
+            file.IsUpdateTarget = _pendingUpdate?.NewFile.FileId == file.File.FileId;
         }
 
         foreach (var requirement in Requirements)
@@ -356,14 +440,33 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
         }
 
         DownloadHint = !_session.HasApiKey
-            ? "Downloads need your Nexus Mods API key. Add it on the Settings page; browsing works without it."
+            ? "Downloads use a Nexus Mods account. Click Install and you will be guided through connecting yours (about a minute)."
             : !_session.IsPremium && !Mod.DirectDownloadEnabled
-                ? "Free account: Install opens the file's page on Nexus Mods, where \"Mod Manager Download\" sends the file to this app."
+                ? "Free account: Install opens the file's download page on Nexus Mods. Click \"Slow download\" there and the file comes back here on its own."
                 : null;
     }
 
+    // ------------------------------------------------------------------------------------------------------
+    // Actions
+    // ------------------------------------------------------------------------------------------------------
+
     [RelayCommand]
     private void OpenOnNexus() => _windows.OpenUrl(Mod.PageUrl);
+
+    /// <summary>The gold button: installs the main file, or applies the known update.</summary>
+    [RelayCommand]
+    private async Task PrimaryActionAsync()
+    {
+        if (_pendingUpdate is { } update)
+        {
+            _logger.LogInformation("Update requested from the detail page: mod {Mod} -> {Version}", Mod.ModId, update.NewVersion);
+            await _installs.UpdateFromNexusAsync(update);
+            RefreshState();
+            return;
+        }
+
+        await InstallMainAsync();
+    }
 
     [RelayCommand]
     private async Task InstallFileAsync(BrowseFileViewModel? file)
@@ -378,8 +481,7 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
         RefreshState();
     }
 
-    /// <summary>Installs the primary (or newest main) file: the one-click action at the top of the panel.</summary>
-    [RelayCommand]
+    /// <summary>Installs the primary (or newest main) file.</summary>
     private async Task InstallMainAsync()
     {
         var main = FileGroups.SelectMany(g => g.Files).Select(f => f.File)
@@ -392,11 +494,31 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
             return;
         }
 
+        _logger.LogInformation("Install requested from the detail page: mod {Mod} main file {File}", Mod.ModId, main.FileId);
         await _installs.InstallFromNexusAsync(Mod, main);
         RefreshState();
     }
 
-    public bool HasMainFile => FileGroups.SelectMany(g => g.Files).Any(f => f.File.Category == NexusFileCategory.Main);
+    /// <summary>A requirement on Nexus opens as its own detail page; an off-site one opens in the browser.</summary>
+    [RelayCommand]
+    private async Task OpenRequirementAsync(BrowseRequirementViewModel? requirement)
+    {
+        if (requirement is null)
+        {
+            return;
+        }
+
+        if (requirement.Requirement.ModId is { } id)
+        {
+            await _openMod(id);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requirement.Requirement.Url))
+        {
+            _windows.OpenUrl(requirement.Requirement.Url);
+        }
+    }
 
     public void Cancel() => _lifetime.Cancel();
 

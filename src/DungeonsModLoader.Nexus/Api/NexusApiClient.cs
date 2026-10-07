@@ -528,7 +528,7 @@ public sealed class NexusApiClient : INexusApiClient
 
     private static NexusApiException MapError(HttpStatusCode status, string? serverMessage) => status switch
     {
-        HttpStatusCode.Unauthorized => new NexusAuthException(status, "Nexus Mods rejected the API key. Check the key in Settings (it may have been revoked).", serverMessage),
+        HttpStatusCode.Unauthorized => new NexusAuthException(status, "Nexus Mods rejected the API key. Make sure you copied the whole key from the API keys page, or request a new key there (a revoked key stops working).", serverMessage),
         HttpStatusCode.Forbidden => new NexusApiException(status, "Nexus Mods refused this request for your account.", serverMessage),
         HttpStatusCode.NotFound => new NexusApiException(status, "Nexus Mods has no such mod or file (it may have been removed).", serverMessage),
         HttpStatusCode.Gone => new NexusApiException(status, "This link has expired.", serverMessage),

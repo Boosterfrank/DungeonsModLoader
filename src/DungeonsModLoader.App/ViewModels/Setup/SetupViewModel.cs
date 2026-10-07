@@ -31,7 +31,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     private readonly IPermissionFixer _permissions;
     private readonly IDialogService _dialogs;
     private readonly INexusSession _nexus;
-    private readonly IUrlOpener _urls;
+    private readonly INexusConnectPrompt _connect;
     private readonly AppPaths _paths;
     private readonly ILogger<SetupViewModel> _logger;
     private readonly CancellationTokenSource _lifetime = new();
@@ -46,7 +46,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         IPermissionFixer permissions,
         IDialogService dialogs,
         INexusSession nexus,
-        IUrlOpener urls,
+        INexusConnectPrompt connect,
         AppPaths paths,
         ILogger<SetupViewModel> logger)
     {
@@ -57,7 +57,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         _permissions = permissions;
         _dialogs = dialogs;
         _nexus = nexus;
-        _urls = urls;
+        _connect = connect;
         _paths = paths;
         _logger = logger;
 
@@ -153,14 +153,13 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     {
         SetupStep.GameFolder => $"We'll look for {AppInfo.GameDisplayName} on this PC. Pick the install you want to manage mods for.",
         SetupStep.ExistingMods => "Mods that were already in ~mods have been added to your list automatically. Nothing was moved or deleted.",
-        SetupStep.Nexus => "Optional: connect your Nexus Mods account to download mods from the Browse page and get update notices. You can skip this and add the key later in Settings.",
+        SetupStep.Nexus => "Optional: connect your Nexus Mods account to download mods from the Browse page and get update notices. You can skip this and connect later from Settings or the Browse page.",
         _ => $"{AppInfo.DisplayName} is ready. Here's what was set up.",
     };
 
     public string NextText => CurrentStep switch
     {
         SetupStep.Done => "Finish",
-        SetupStep.Nexus when !IsNexusConnected && ApiKeyInput.Trim().Length > 0 => "Verify & continue",
         SetupStep.Nexus when !IsNexusConnected => "Skip for now",
         _ => "Next",
     };
@@ -270,11 +269,6 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
                 break;
 
             case SetupStep.Nexus:
-                if (!IsNexusConnected && ApiKeyInput.Trim().Length > 0 && !await ConnectNexusAsync())
-                {
-                    return;
-                }
-
                 if (!IsNexusConnected)
                 {
                     _logger.LogInformation("Nexus Mods step skipped during setup");
@@ -529,11 +523,6 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
 
     public bool IsSsoAvailable => NexusConstants.IsSsoAvailable;
 
-    /// <summary>The pasted personal key (bridged from the PasswordBox by the window; never logged).</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(NextText))]
-    private string _apiKeyInput = string.Empty;
-
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsNexusConnected), nameof(NexusSummary), nameof(NextText))]
     private string? _nexusUserName;
@@ -548,8 +537,20 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         ? $"Nexus Mods: connected as {NexusUserName}{(_nexus.IsPremium ? " (Premium)" : string.Empty)}"
         : "Nexus Mods: not connected. Add your key any time in Settings; browsing works without it.";
 
-    [RelayCommand]
-    private void OpenApiKeyPage() => _urls.OpenUrl(NexusConstants.ApiKeyPageUrl);
+    private bool CanConnectNexus() => !IsBusy;
+
+    /// <summary>"Connect Nexus Mods account": the guided dialog (open the key page, copy, paste, verify &amp; save).</summary>
+    [RelayCommand(CanExecute = nameof(CanConnectNexus))]
+    private async Task ConnectNexusAsync()
+    {
+        NexusError = null;
+        var connected = await _connect.ShowAsync("Connect now to download mods from the Browse page. You can also do this later.");
+        NexusUserName = _nexus.User?.Name;
+        if (connected)
+        {
+            _logger.LogInformation("Nexus Mods account connected during setup");
+        }
+    }
 
     private bool CanLoginWithSso() => !IsBusy && IsSsoAvailable;
 
@@ -578,42 +579,6 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         catch (NexusException ex)
         {
             NexusError = ex.Message;
-        }
-        finally
-        {
-            IsBusy = false;
-            BusyText = null;
-        }
-    }
-
-    /// <summary>Validates and stores the pasted key; a problem is shown inline and keeps the user on the step.</summary>
-    private async Task<bool> ConnectNexusAsync()
-    {
-        var provider = _nexus.Providers.FirstOrDefault(p => p.Method == NexusAuthMethod.PersonalApiKey);
-        if (provider is null)
-        {
-            return true;
-        }
-
-        NexusError = null;
-        IsBusy = true;
-        BusyText = "Checking the key with Nexus Mods…";
-        try
-        {
-            var user = await _nexus.LoginAsync(provider, ApiKeyInput, cancellationToken: _lifetime.Token);
-            NexusUserName = user.Name;
-            ApiKeyInput = string.Empty;
-            _logger.LogInformation("Nexus Mods account connected during setup");
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
-        catch (NexusException ex)
-        {
-            NexusError = ex.Message;
-            return false;
         }
         finally
         {

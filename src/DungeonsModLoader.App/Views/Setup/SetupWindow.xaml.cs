@@ -23,45 +23,6 @@ public partial class SetupWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         viewModel.CloseRequested += OnCloseRequested;
-        viewModel.PropertyChanged += OnViewModelPropertyChanged;
-    }
-
-    private bool _syncingKey;
-
-    /// <summary>PasswordBox.Password is not bindable: hand the typed key to the view model (never logged).</summary>
-    private void OnApiKeyPasswordChanged(object sender, RoutedEventArgs e)
-    {
-        if (_syncingKey)
-        {
-            return;
-        }
-
-        _syncingKey = true;
-        try
-        {
-            _viewModel.ApiKeyInput = ((System.Windows.Controls.PasswordBox)sender).Password;
-        }
-        finally
-        {
-            _syncingKey = false;
-        }
-    }
-
-    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        // The view model clears the key after a successful login; mirror that in the box.
-        if (e.PropertyName == nameof(SetupViewModel.ApiKeyInput) && !_syncingKey && ApiKeyBox.Password != _viewModel.ApiKeyInput)
-        {
-            _syncingKey = true;
-            try
-            {
-                ApiKeyBox.Password = _viewModel.ApiKeyInput;
-            }
-            finally
-            {
-                _syncingKey = false;
-            }
-        }
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -117,7 +78,6 @@ public partial class SetupWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _viewModel.CloseRequested -= OnCloseRequested;
-        _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.Dispose();
     }
 

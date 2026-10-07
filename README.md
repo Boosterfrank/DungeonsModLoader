@@ -66,24 +66,42 @@ such a file and lists the mods that are not installed on this PC.
 ## Nexus Mods
 
 The Browse page lists Trending / Latest added / Recently updated mods and searches Nexus Mods for the game
-(`minecraftdungeons2`). Browsing works **without an account** through the public GraphQL API; downloads and update
-checks need your personal API key:
+(`minecraftdungeons2`). Clicking a mod opens it as a full page (picture, Description / Files / Requirements tabs,
+Install, Open on Nexus Mods; Back or Esc returns to the list). Browsing works **without an account** through the
+public GraphQL API; downloads and update checks need your personal API key.
 
-1. Open the Nexus Mods [API Access](https://www.nexusmods.com/users/myaccount?tab=api%20access) page and create a
-   personal key.
-2. Paste it on the Settings page ("Verify & save") or during first-run setup. The key is stored DPAPI-encrypted for
-   your Windows account in `%LOCALAPPDATA%\DungeonsModLoader\nexus-apikey.bin`, is only ever sent to
-   `api.nexusmods.com`, and is masked in the log.
-3. **Premium** members download inside the app. **Free** accounts click "Mod Manager Download" on the Nexus website;
-   with the "Handle nxm:// links" switch on (Settings), that button opens the download in the app (the app is
-   single-instance: a second launch forwards the link to the running one).
+**Connecting the account** is one guided dialog, reachable from the Browse page, Settings, the first-run wizard, or
+simply by clicking Install on a mod (the download continues once connected):
 
-Once the app is registered with Nexus Mods (`NexusConstants.AppSlug`), "Log in with Nexus" appears and the key
-field moves behind "Advanced". Updates: on startup (at most once an hour) and on demand, installed Nexus mods are
-compared with the mod's file list (author "newer version of" chains, then the newest main file); "Update" replaces
-the folder in place, keeps the name, enabled state and profile membership, and keeps the last two versions in
-`backups\`. API responses and thumbnails are cached under `cache\` with short lifetimes; rate-limit headers are
-honoured.
+1. "Open the API keys page" opens your Nexus Mods account page in the browser (log in if asked).
+2. Scroll to *Personal API Key*, click *Request an API key* if there is none yet, then *Copy*.
+3. Click *Paste* in the dialog and *Connect*. The key is checked with Nexus and stored DPAPI-encrypted for your
+   Windows account in `%LOCALAPPDATA%\DungeonsModLoader\nexus-apikey.bin`; it is only ever sent to
+   `api.nexusmods.com` and is masked in the log.
+
+**Downloading**: Premium members download inside the app. For free accounts the app opens the file's download page on
+the Nexus website; click **"Slow download"** there (or **"Mod Manager Download"** if you see the file list) and, if the
+browser asks, allow it to open DungeonsModLoader. The file then comes back through an `nxm://` link and the install
+continues on its own (a "Waiting for Nexus Mods..." notice stays in the corner meanwhile). For that to work the app
+must be the handler for `nxm://` links; the first free download offers to turn this on (Settings > "Handle nxm://
+links" shows which program currently has it, e.g. Vortex, and lets you switch back). The app is single-instance: a
+second launch forwards the link to the running one.
+
+Once the app is registered with Nexus Mods (`NexusConstants.AppSlug`), "Log in with Nexus" appears next to the key
+steps. Updates: on startup (at most once an hour) and on demand, installed Nexus mods are compared with the mod's
+file list (author "newer version of" chains, then the newest main file); "Update" replaces the folder in place,
+keeps the name, enabled state and profile membership, and keeps the last two versions in `backups\`. API responses
+and thumbnails are cached under `cache\` with short lifetimes; rate-limit headers are honoured.
+
+## Hints and notifications
+
+- **Dependency hints**: a Nexus mod's requirements are recorded when it is installed (and fetched from the public
+  API for mods that have none recorded). When a required mod is not installed or is disabled, the row shows a
+  "Needs X" badge; clicking it opens the mod on the Browse page, or enables it when it is only disabled.
+- **Conflict hints**: when two *enabled* mods contain `.pak/.ucas/.utoc` files with the same base name, both rows
+  show "Conflicts with ..." with the shared names in the tooltip (the game loads only one of them).
+- **Toasts** in the bottom-right report installs, updates, update-check results and the "waiting for Nexus Mods"
+  state; dialogs are only used for questions and for errors with details.
 
 ## Installing mods from files
 

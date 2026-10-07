@@ -35,6 +35,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IUrlOpener>(provider => provider.GetRequiredService<WindowService>());
         services.AddSingleton<INxmProtocolRegistration, NxmProtocolRegistration>();
         services.AddSingleton<ISingleInstanceServer, SingleInstanceServer>();
+        services.AddSingleton<IToastService, ToastService>();
+        services.AddSingleton<IAppNavigator, AppNavigator>();
+        services.AddSingleton<INexusConnectPrompt, NexusConnectPrompt>();
 
         services
             .AddCoreInfrastructure()
@@ -62,6 +65,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<BrowseViewModel>();
         services.AddSingleton<ProfilesViewModel>();
         services.AddSingleton<SettingsViewModel>();
+        services.AddTransient<ViewModels.Dialogs.NexusConnectViewModel>();
         return services;
     }
 

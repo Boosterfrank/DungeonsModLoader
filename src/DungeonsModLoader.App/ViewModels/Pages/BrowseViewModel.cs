@@ -21,9 +21,10 @@ public enum BrowseTab
 }
 
 /// <summary>
-/// Browse page: Trending / Latest added / Recently updated lists and text search on Nexus Mods, a grid of cards
-/// and a detail panel. Works without an API key (public GraphQL); downloads need one. Loads lazily the first
-/// time the page is shown.
+/// Browse page: Trending / Latest added / Recently updated lists and text search on Nexus Mods as a grid of
+/// cards; clicking a card opens the mod as a full page (Back returns to the grid exactly as it was). Works
+/// without an API key (public GraphQL); downloads need one and start the connect dialog when it is missing.
+/// Loads lazily the first time the page is shown.
 /// </summary>
 public sealed partial class BrowseViewModel : PageViewModel
 {
@@ -36,7 +37,12 @@ public sealed partial class BrowseViewModel : PageViewModel
     private readonly IInstallCoordinator _installs;
     private readonly IWindowService _windows;
     private readonly IThumbnailCache _thumbnails;
+    private readonly INexusConnectPrompt _connect;
+    private readonly IToastService _toasts;
     private readonly ILogger<BrowseViewModel> _logger;
+
+    /// <summary>Detail pages opened from a detail page (requirements); Back pops them before returning to the grid.</summary>
+    private readonly Stack<BrowseDetailViewModel> _history = new();
 
     private int _loadVersion;
     private int _offset;
@@ -51,6 +57,8 @@ public sealed partial class BrowseViewModel : PageViewModel
         IInstallCoordinator installs,
         IWindowService windows,
         IThumbnailCache thumbnails,
+        INexusConnectPrompt connect,
+        IToastService toasts,
         ILogger<BrowseViewModel> logger)
     {
         _client = client;
@@ -60,6 +68,8 @@ public sealed partial class BrowseViewModel : PageViewModel
         _installs = installs;
         _windows = windows;
         _thumbnails = thumbnails;
+        _connect = connect;
+        _toasts = toasts;
         _logger = logger;
 
         _session.Changed += (_, _) => OnUiThread(RefreshAccountState);
@@ -138,11 +148,18 @@ public sealed partial class BrowseViewModel : PageViewModel
     [ObservableProperty]
     private bool _showLoginHint;
 
+    /// <summary>The mod shown as a full page; null shows the grid.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasSelection))]
+    [NotifyPropertyChangedFor(nameof(HasSelection), nameof(ShowList))]
     private BrowseDetailViewModel? _selected;
 
     public bool HasSelection => Selected is not null;
+
+    public bool ShowList => Selected is null;
+
+    /// <summary>True while a mod that is not in the grid is fetched for its detail page (a requirement, a hint on the Installed page).</summary>
+    [ObservableProperty]
+    private bool _isOpeningMod;
 
     public bool ShowEmpty => !IsLoading && Cards.Count == 0 && ErrorText is null && _loadedOnce;
 
@@ -177,42 +194,103 @@ public sealed partial class BrowseViewModel : PageViewModel
 
     private bool CanLoadMore() => HasMore && !IsLoading && !IsLoadingMore;
 
+    /// <summary>A card was clicked: open the mod as a full page.</summary>
     [RelayCommand]
-    private async Task SelectAsync(BrowseModCardViewModel? card)
+    private Task SelectAsync(BrowseModCardViewModel? card) => card is null ? Task.CompletedTask : OpenDetailAsync(card.Mod);
+
+    /// <summary>
+    /// Opens the detail page of a mod by Nexus id: from the grid when it is there, otherwise fetched from Nexus
+    /// (requirement links, dependency hints on the Installed page). Problems are reported as a toast.
+    /// </summary>
+    public async Task ShowModAsync(long modId)
     {
-        if (card is null)
+        if (Selected?.Mod.ModId == modId)
         {
             return;
         }
 
-        foreach (var other in Cards)
+        var mod = Cards.FirstOrDefault(c => c.ModId == modId)?.Mod ?? _history.FirstOrDefault(d => d.Mod.ModId == modId)?.Mod;
+        if (mod is null)
         {
-            other.IsSelected = ReferenceEquals(other, card);
+            IsOpeningMod = true;
+            try
+            {
+                mod = await _client.GetModAsync(modId);
+            }
+            catch (NexusException ex)
+            {
+                _logger.LogWarning("Mod {Mod} could not be opened: {Message}", modId, ex.Message);
+                _toasts.Show(ex.Message, ToastKind.Warning, "Could not open the mod");
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Mod {Mod} could not be opened", modId);
+                _toasts.Show("Something went wrong while talking to Nexus Mods. See the log for details.", ToastKind.Error, "Could not open the mod");
+                return;
+            }
+            finally
+            {
+                IsOpeningMod = false;
+            }
         }
 
-        Selected?.Cancel();
-        var detail = new BrowseDetailViewModel(card.Mod, _client, _session, _mods, _updates, _installs, _windows, _thumbnails, _logger);
+        await OpenDetailAsync(mod);
+    }
+
+    private async Task OpenDetailAsync(NexusMod mod)
+    {
+        if (Selected is { } current)
+        {
+            if (current.Mod.ModId == mod.ModId)
+            {
+                return;
+            }
+
+            _history.Push(current);
+        }
+
+        var detail = new BrowseDetailViewModel(mod, _client, _session, _mods, _updates, _installs, _windows, _thumbnails, ShowModAsync, _logger);
         Selected = detail;
+        HighlightCard(mod.ModId);
+        _logger.LogDebug("Opened the detail page of mod {Mod} ({Name}); {Depth} page(s) behind it", mod.ModId, mod.Name, _history.Count);
+
         try
         {
             await detail.LoadAsync();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Loading the detail panel for mod {Mod} failed", card.ModId);
+            _logger.LogError(ex, "Loading the detail page of mod {Mod} failed", mod.ModId);
+        }
+    }
+
+    /// <summary>The back arrow (also Esc): the previous detail page when there is one, otherwise the grid.</summary>
+    [RelayCommand]
+    private void Back()
+    {
+        if (Selected is null)
+        {
+            return;
+        }
+
+        Selected.Cancel();
+        if (_history.Count > 0)
+        {
+            var previous = _history.Pop();
+            previous.RefreshState();
+            Selected = previous;
+            HighlightCard(previous.Mod.ModId);
+        }
+        else
+        {
+            Selected = null;
+            HighlightCard(null);
         }
     }
 
     [RelayCommand]
-    private void CloseDetail()
-    {
-        Selected?.Cancel();
-        Selected = null;
-        foreach (var card in Cards)
-        {
-            card.IsSelected = false;
-        }
-    }
+    private Task ConnectNexusAsync() => _connect.ShowAsync("Connect your account to download mods and to get update notices.");
 
     [RelayCommand]
     private void OpenNexusGamePage() => _windows.OpenUrl($"{NexusConstants.WebsiteBaseUrl}/games/{NexusConstants.GameDomain}");
@@ -262,6 +340,7 @@ public sealed partial class BrowseViewModel : PageViewModel
             {
                 var card = new BrowseModCardViewModel(mod);
                 card.RefreshState(_mods, _updates);
+                card.IsSelected = Selected?.Mod.ModId == mod.ModId;
                 Cards.Add(card);
                 _ = LoadThumbnailAsync(card);
             }
@@ -313,6 +392,14 @@ public sealed partial class BrowseViewModel : PageViewModel
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogDebug(ex, "Thumbnail for mod {Mod} failed", card.ModId);
+        }
+    }
+
+    private void HighlightCard(long? modId)
+    {
+        foreach (var card in Cards)
+        {
+            card.IsSelected = card.ModId == modId;
         }
     }
 

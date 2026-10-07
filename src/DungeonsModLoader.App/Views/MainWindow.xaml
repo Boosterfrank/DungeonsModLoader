@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:DungeonsModLoader.App.Views.Shell"
         xmlns:core="clr-namespace:DungeonsModLoader.Core;assembly=DungeonsModLoader.Core"
+        xmlns:services="clr-namespace:DungeonsModLoader.App.Services"
         Title="{x:Static core:AppInfo.DisplayName}"
         Width="1200" Height="760" MinWidth="1000" MinHeight="650"
         WindowStartupLocation="CenterScreen"
@@ -60,6 +61,77 @@
           </DataTrigger>
         </Style.Triggers>
       </Style>
+
+      <!-- ============================ Toasts ============================ -->
+      <!-- Accent bar on the left edge of a toast, coloured by kind. -->
+      <Style x:Key="Shell.ToastBar" TargetType="Border">
+        <Setter Property="Width" Value="4" />
+        <Setter Property="CornerRadius" Value="4,0,0,4" />
+        <Setter Property="Background" Value="{StaticResource Brush.Cyan}" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding IsSuccess}" Value="True">
+            <Setter Property="Background" Value="{StaticResource Brush.Success}" />
+          </DataTrigger>
+          <DataTrigger Binding="{Binding IsWarning}" Value="True">
+            <Setter Property="Background" Value="{StaticResource Brush.Warning}" />
+          </DataTrigger>
+          <DataTrigger Binding="{Binding IsError}" Value="True">
+            <Setter Property="Background" Value="{StaticResource Brush.Danger}" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
+
+      <Style x:Key="Shell.ToastAction" TargetType="Button" BasedOn="{StaticResource Button.Secondary}">
+        <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="Margin" Value="0,10,0,0" />
+      </Style>
+
+      <!-- One toast: elevated card, accent bar, optional title, message, optional action, dismiss X. Fades and slides in. -->
+      <DataTemplate x:Key="Shell.ToastTemplate" DataType="{x:Type services:ToastViewModel}">
+        <Border Width="380" Margin="0,8,0,0" Padding="0" Style="{DynamicResource Card.Elevated}" Opacity="0">
+          <Border.RenderTransform>
+            <TranslateTransform Y="12" />
+          </Border.RenderTransform>
+          <Border.Triggers>
+            <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+              <BeginStoryboard>
+                <Storyboard>
+                  <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="{StaticResource Duration.Normal}" />
+                  <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="0" Duration="{StaticResource Duration.Normal}">
+                    <DoubleAnimation.EasingFunction>
+                      <QuadraticEase EasingMode="EaseOut" />
+                    </DoubleAnimation.EasingFunction>
+                  </DoubleAnimation>
+                </Storyboard>
+              </BeginStoryboard>
+            </EventTrigger>
+          </Border.Triggers>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Style="{StaticResource Shell.ToastBar}" />
+            <StackPanel Grid.Column="1" Margin="14,12,6,12">
+              <TextBlock Style="{StaticResource Text.Body}" FontWeight="SemiBold" Text="{Binding Title}" TextWrapping="Wrap" Margin="0,0,0,3"
+                         Visibility="{Binding HasTitle, Converter={StaticResource Converter.BoolToVisibility}}" />
+              <TextBlock Style="{StaticResource Text.Body}" Foreground="{StaticResource Brush.Text.Secondary}" Text="{Binding Message}" TextWrapping="Wrap" />
+              <Button Style="{StaticResource Shell.ToastAction}" Content="{Binding ActionText}" Command="{Binding RunActionCommand}"
+                      Visibility="{Binding HasAction, Converter={StaticResource Converter.BoolToVisibility}}" />
+            </StackPanel>
+            <Button Grid.Column="2" Style="{DynamicResource Button.Icon}" Width="28" Height="28" Margin="0,8,8,0" VerticalAlignment="Top"
+                    Command="{Binding DismissCommand}" ToolTip="Dismiss" AutomationProperties.Name="Dismiss notification">
+              <Path Data="{StaticResource Glyph.Close}" Width="9" Height="9" Stretch="Uniform"
+                    Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+            </Button>
+          </Grid>
+        </Border>
+      </DataTemplate>
     </ResourceDictionary>
   </Window.Resources>
 
@@ -237,6 +309,15 @@
     <!-- ============================ Content ============================ -->
     <shell:TransitioningContentControl Grid.Row="1" Grid.Column="1"
                                        Content="{Binding CurrentPage}" />
+
+    <!-- ============================ Toasts (bottom-right) ============================ -->
+    <ItemsControl Grid.Row="1" Grid.Column="1"
+                  ItemsSource="{Binding Toasts}"
+                  ItemTemplate="{StaticResource Shell.ToastTemplate}"
+                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                  Margin="0,0,24,24"
+                  Focusable="False" IsTabStop="False"
+                  AutomationProperties.Name="Notifications" />
 
     <!-- ============================ Drop overlay ============================ -->
     <!-- Shown while acceptable files are dragged over the window; not hit-test visible so the grid stays the drop target. -->
