@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using DungeonsModLoader.Core.AppUpdates;
 using DungeonsModLoader.Core.Tests.Nexus;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -146,5 +146,16 @@ public class AppUpdateTests
         var client = new HttpClient(handler, disposeHandler: false);
         client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "DungeonsModLoader/0.0.1 (test)");
         return client;
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, true)]
+    [InlineData(10, true)]
+    public void Update_becomes_mandatory_after_two_outdated_starts(int outdatedStarts, bool mandatory)
+    {
+        Assert.Equal(mandatory, AppUpdatePolicy.IsMandatory(outdatedStarts));
     }
 }

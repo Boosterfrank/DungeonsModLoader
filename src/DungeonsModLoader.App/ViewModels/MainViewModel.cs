@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -89,7 +89,7 @@ public sealed partial class MainViewModel : ObservableObject
     public ProfilesViewModel Profiles { get; }
     public SettingsViewModel Settings { get; }
 
-    /// <summary>The full-window picture viewer (opened from a mod's Images tab).</summary>
+    /// <summary>The full-window picture viewer (opened by clicking a mod's picture).</summary>
     public ImagePreviewViewModel Preview { get; }
 
     /// <summary>Bottom-right notifications ("Installed X", "Waiting for Nexus Mods..."), bound by the window.</summary>

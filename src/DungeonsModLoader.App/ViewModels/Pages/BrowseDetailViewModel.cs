@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DungeonsModLoader.App.Services;
@@ -110,39 +110,17 @@ public sealed partial class BrowseRequirementViewModel : ObservableObject
     }
 }
 
-/// <summary>One picture of the Images tab (the page picture or a picture from the description).</summary>
-public sealed partial class ModImageViewModel : ObservableObject
-{
-    public ModImageViewModel(string url, int index, int count)
-    {
-        Url = url;
-        Index = index;
-        Caption = $"{index + 1} / {count}";
-    }
-
-    public string Url { get; }
-
-    public int Index { get; }
-
-    public string Caption { get; }
-
-    /// <summary>Cached file once downloaded; null shows the placeholder.</summary>
-    [ObservableProperty]
-    private string? _path;
-}
-
 /// <summary>Sections of the detail page.</summary>
 public enum DetailTab
 {
     Description,
-    Images,
     Files,
     Requirements,
 }
 
 /// <summary>
-/// The full-page detail of a mod on the Browse page: hero picture, title and actions, then Description / Images /
-/// Files / Requirements tabs. Loads its parts independently so one failing request does not blank the others.
+/// The full-page detail of a mod on the Browse page: hero picture, title and actions, then Description / Files /
+/// Requirements tabs. Loads its parts independently so one failing request does not blank the others.
 /// </summary>
 public sealed partial class BrowseDetailViewModel : ObservableObject
 {
@@ -207,27 +185,18 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
 
     public ObservableCollection<BrowseRequirementViewModel> Requirements { get; } = new();
 
-    /// <summary>The page picture and the pictures from the description, in page order.</summary>
-    public ObservableCollection<ModImageViewModel> Images { get; } = new();
-
     // ------------------------------------------------------------------------------------------------------
     // Tabs
     // ------------------------------------------------------------------------------------------------------
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsDescriptionTab), nameof(IsImagesTab), nameof(IsFilesTab), nameof(IsRequirementsTab))]
+    [NotifyPropertyChangedFor(nameof(IsDescriptionTab), nameof(IsFilesTab), nameof(IsRequirementsTab))]
     private DetailTab _tab = DetailTab.Description;
 
     public bool IsDescriptionTab
     {
         get => Tab == DetailTab.Description;
         set => SelectTab(value, DetailTab.Description);
-    }
-
-    public bool IsImagesTab
-    {
-        get => Tab == DetailTab.Images;
-        set => SelectTab(value, DetailTab.Images);
     }
 
     public bool IsFilesTab
@@ -263,14 +232,6 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
     public bool HasRequirements => RequirementCount > 0;
 
     public string RequirementsTabTitle => RequirementCount == 0 ? "Requirements" : $"Requirements ({RequirementCount})";
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasImages), nameof(ImagesTabTitle))]
-    private int _imageCount;
-
-    public bool HasImages => ImageCount > 0;
-
-    public string ImagesTabTitle => ImageCount == 0 ? "Images" : $"Images ({ImageCount})";
 
     // ------------------------------------------------------------------------------------------------------
     // Content state
@@ -353,9 +314,7 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
         var description = LoadDescriptionAsync(token);
         var files = LoadFilesAsync(token);
         var requirements = LoadRequirementsAsync(token);
-        await description;
-        BuildImages(token);
-        await Task.WhenAll(picture, files, requirements);
+        await Task.WhenAll(picture, description, files, requirements);
     }
 
     private async Task LoadPictureAsync(CancellationToken token)
@@ -395,38 +354,6 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
         finally
         {
             IsLoadingDescription = false;
-        }
-    }
-
-    /// <summary>The Images tab: the page picture plus every [img] of the description (the API has no gallery).</summary>
-    private void BuildImages(CancellationToken token)
-    {
-        if (token.IsCancellationRequested)
-        {
-            return;
-        }
-
-        var urls = ModImageList.Collect(Mod.PictureUrl, Description);
-        Images.Clear();
-        for (var i = 0; i < urls.Count; i++)
-        {
-            var image = new ModImageViewModel(urls[i], i, urls.Count);
-            Images.Add(image);
-            _ = LoadImageThumbnailAsync(image, token);
-        }
-
-        ImageCount = Images.Count;
-    }
-
-    private async Task LoadImageThumbnailAsync(ModImageViewModel image, CancellationToken token)
-    {
-        try
-        {
-            image.Path = await _thumbnails.GetFileAsync(image.Url, token);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogDebug(ex, "Picture {Url} of mod {Mod} could not be loaded", image.Url, Mod.ModId);
         }
     }
 
@@ -596,27 +523,12 @@ public sealed partial class BrowseDetailViewModel : ObservableObject
         }
     }
 
-    /// <summary>Opens the picture viewer at the clicked picture (Images tab).</summary>
-    [RelayCommand]
-    private void OpenImage(ModImageViewModel? image)
-    {
-        if (image is null || Images.Count == 0)
-        {
-            return;
-        }
-
-        _preview.Open(Images.Select(i => i.Url).ToList(), image.Index, Name);
-    }
-
-    /// <summary>The hero picture was clicked: open the viewer at the first picture.</summary>
+    /// <summary>The hero picture was clicked: show it large in the viewer.</summary>
     [RelayCommand]
     private void OpenHero()
     {
-        if (Images.Count > 0)
-        {
-            _preview.Open(Images.Select(i => i.Url).ToList(), 0, Name);
-        }
-        else if (Mod.PictureUrl is { } url)
+        var url = Mod.PictureUrl ?? Mod.ThumbnailUrl;
+        if (!string.IsNullOrWhiteSpace(url))
         {
             _preview.Open(new[] { url }, 0, Name);
         }

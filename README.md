@@ -129,10 +129,10 @@ such a file and lists the mods that are not installed on this PC.
 
 The Browse page lists Trending / Latest added / Recently updated mods and searches Nexus Mods for the game
 (`minecraftdungeons2`), 24 per page with page navigation. Clicking a mod opens it as a full page (picture,
-Description / Images / Files / Requirements tabs, Install, Open on Nexus Mods; Back or Esc returns to the list).
-The Images tab shows the page picture and every picture embedded in the description (the website's own image
-gallery has no public API); clicking a picture opens it large in a viewer with Left / Right navigation. Browsing works **without an account** through the
-public GraphQL API; downloads and update checks need your personal API key.
+Description / Files / Requirements tabs, Install, Open on Nexus Mods; Back or Esc returns to the list). Clicking
+the picture shows it large. The page's image gallery is not part of the official API (the `Mod` type exposes only
+the header picture), so only that picture and the pictures embedded in the description are shown. Browsing works
+**without an account** through the public GraphQL API; downloads and update checks need your personal API key.
 
 **Connecting the account** is one guided dialog, reachable from the Browse page, Settings, the first-run wizard, or
 simply by clicking Install on a mod (the download continues once connected):
