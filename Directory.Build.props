@@ -2,7 +2,7 @@
 
   <!-- Shared settings for every project in the solution. The app version lives here (one place). -->
   <PropertyGroup>
-    <Version>0.1.3</Version>
+    <Version>0.2.0</Version>
     <Authors>Boosterfrank</Authors>
     <Company>Boosterfrank</Company>
     <Product>DungeonsModLoader</Product>

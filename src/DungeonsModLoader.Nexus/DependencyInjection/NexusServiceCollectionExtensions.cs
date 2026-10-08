@@ -1,9 +1,10 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using DungeonsModLoader.Core;
 using DungeonsModLoader.Nexus.Api;
 using DungeonsModLoader.Nexus.Auth;
 using DungeonsModLoader.Nexus.Download;
+using DungeonsModLoader.Nexus.Linking;
 using DungeonsModLoader.Nexus.Updates;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -47,6 +48,7 @@ public static class NexusServiceCollectionExtensions
         services.TryAddSingleton<INexusSession, NexusSession>();
         services.TryAddSingleton<IDownloadService, HttpDownloadService>();
         services.TryAddSingleton<IModUpdateChecker, ModUpdateChecker>();
+        services.TryAddSingleton<IModLinkFinder, ModLinkFinder>();
         return services;
     }
 

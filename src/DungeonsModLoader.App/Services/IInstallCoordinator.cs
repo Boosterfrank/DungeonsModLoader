@@ -1,4 +1,4 @@
-using DungeonsModLoader.Core.Mods;
+﻿using DungeonsModLoader.Core.Mods;
 using DungeonsModLoader.Nexus.Api;
 using DungeonsModLoader.Nexus.Nxm;
 using DungeonsModLoader.Nexus.Updates;
@@ -30,7 +30,8 @@ public interface IInstallCoordinator
     /// <summary>
     /// Downloads and installs a Nexus file. Premium accounts (and <c>nxm://</c> links carrying the website token)
     /// download directly; free accounts without a token are sent to the file's page on Nexus Mods. When the mod is
-    /// already installed the user chooses between replacing it in place and installing separately.
+    /// already installed and the file is a newer version of it, the mod is updated in place without asking; for
+    /// any other file of the mod the user chooses between replacing it and installing separately.
     /// </summary>
     Task<ModEntry?> InstallFromNexusAsync(NexusMod mod, NexusFile file, NxmLink? link = null);
 

@@ -1,0 +1,132 @@
+﻿<UserControl x:Class="DungeonsModLoader.App.Views.Dialogs.LinkModsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:DungeonsModLoader.App.Controls"
+             xmlns:vm="clr-namespace:DungeonsModLoader.App.ViewModels.Dialogs"
+             Focusable="False">
+
+  <!--
+    One card per local mod: name + folder/pak files on the left; on the right the Nexus page picker (best match
+    preselected), the installed-version picker once a page is chosen, a status line and a manual search box.
+    DataContext: LinkModsViewModel. Used by LinkModsDialog and by the first-run wizard.
+  -->
+  <UserControl.Resources>
+    <!-- A Nexus page in the dropdown: thumbnail, name, "by author · downloads · match". -->
+    <DataTemplate x:Key="Link.CandidateTemplate" DataType="{x:Type vm:LinkCandidateViewModel}">
+      <Grid Margin="0,2">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid Grid.Column="0" Width="44" Height="25" Margin="0,0,10,0" VerticalAlignment="Center"
+              Visibility="{Binding HasSubtitle, Converter={StaticResource Converter.BoolToVisibility}}">
+          <Border Background="{StaticResource Brush.Bg.Input}" CornerRadius="3" />
+          <Border CornerRadius="3" Background="{Binding ThumbnailPath, Converter={StaticResource Converter.FileToImageBrush}, ConverterParameter=120}" />
+        </Grid>
+        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+          <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Title}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" />
+          <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Muted}" Text="{Binding Subtitle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                     Visibility="{Binding HasSubtitle, Converter={StaticResource Converter.BoolToVisibility}}" />
+        </StackPanel>
+      </Grid>
+    </DataTemplate>
+
+    <DataTemplate x:Key="Link.FileTemplate" DataType="{x:Type vm:LinkFileOptionViewModel}">
+      <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Title}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" />
+    </DataTemplate>
+
+    <DataTemplate x:Key="Link.RowTemplate" DataType="{x:Type vm:LinkModRowViewModel}">
+      <Border Style="{DynamicResource Card}" Padding="14,12" Margin="0,0,0,8">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="16" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+
+          <!-- The local mod -->
+          <StackPanel Grid.Column="0" VerticalAlignment="Top">
+            <TextBlock Style="{StaticResource Text.Body}" FontWeight="SemiBold" Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+            <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Muted}" Text="{Binding Detail}" TextWrapping="Wrap" Margin="0,3,0,0" ToolTip="{Binding Detail}" />
+            <Border Style="{DynamicResource Badge.Success}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                    Visibility="{Binding IsLinked, Converter={StaticResource Converter.BoolToVisibility}}">
+              <TextBlock Text="Linked" />
+            </Border>
+          </StackPanel>
+
+          <!-- The Nexus side -->
+          <StackPanel Grid.Column="2" Visibility="{Binding ShowPicker, Converter={StaticResource Converter.BoolToVisibility}}">
+            <ComboBox ItemsSource="{Binding Candidates}" SelectedItem="{Binding Selected, Mode=TwoWay}"
+                      ItemTemplate="{StaticResource Link.CandidateTemplate}"
+                      IsEnabled="{Binding IsSearching, Converter={StaticResource Converter.InverseBool}}"
+                      HorizontalContentAlignment="Stretch"
+                      AutomationProperties.Name="{Binding Name, StringFormat='Nexus Mods page for {0}'}" />
+
+            <Grid Margin="0,8,0,0" Visibility="{Binding ShowFiles, Converter={StaticResource Converter.BoolToVisibility}}">
+              <ComboBox ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile, Mode=TwoWay}"
+                        ItemTemplate="{StaticResource Link.FileTemplate}"
+                        Visibility="{Binding IsLoadingFiles, Converter={StaticResource Converter.BoolToVisibility.Inverse}}"
+                        ToolTip="Which version of the mod is installed? Update checks compare against it."
+                        AutomationProperties.Name="{Binding Name, StringFormat='Installed version of {0}'}" />
+              <ProgressBar IsIndeterminate="True" Height="4" VerticalAlignment="Center" Margin="4,0"
+                           Visibility="{Binding IsLoadingFiles, Converter={StaticResource Converter.BoolToVisibility}}" />
+            </Grid>
+
+            <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,8,0,0">
+              <TextBlock.Style>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Small}">
+                  <Setter Property="Foreground" Value="{StaticResource Brush.Text.Secondary}" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding HasError}" Value="True">
+                      <Setter Property="Foreground" Value="{StaticResource Brush.Warning}" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </TextBlock.Style>
+            </TextBlock>
+
+            <!-- Manual search for the cases the name matcher misses -->
+            <Grid Margin="0,8,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <TextBox Grid.Column="0" Style="{DynamicResource TextBox.Search}"
+                       controls:TextBoxHelper.Placeholder="Search Nexus Mods by name..."
+                       Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
+                       AutomationProperties.Name="{Binding Name, StringFormat='Search Nexus Mods for {0}'}">
+                <TextBox.InputBindings>
+                  <KeyBinding Key="Return" Command="{Binding SearchCommand}" />
+                </TextBox.InputBindings>
+              </TextBox>
+              <Button Grid.Column="2" Content="Search" Command="{Binding SearchCommand}"
+                      IsEnabled="{Binding IsSearching, Converter={StaticResource Converter.InverseBool}}"
+                      AutomationProperties.Name="{Binding Name, StringFormat='Search for {0}'}">
+                <Button.Style>
+                  <Style TargetType="Button" BasedOn="{StaticResource Button.Secondary}">
+                    <Setter Property="Height" Value="{StaticResource Size.Control.HeightSmall}" />
+                    <Setter Property="MinWidth" Value="0" />
+                    <Setter Property="Padding" Value="14,0" />
+                    <Setter Property="FontSize" Value="{StaticResource FontSize.Small}" />
+                  </Style>
+                </Button.Style>
+              </Button>
+            </Grid>
+          </StackPanel>
+
+          <TextBlock Grid.Column="2" Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Text.Secondary}"
+                     Text="{Binding StatusText}" TextWrapping="Wrap" VerticalAlignment="Center"
+                     Visibility="{Binding IsLinked, Converter={StaticResource Converter.BoolToVisibility}}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <StackPanel>
+    <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding SummaryText}" TextWrapping="Wrap" Margin="0,0,0,12" />
+    <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource Link.RowTemplate}" Focusable="False" IsTabStop="False" />
+    <TextBlock Style="{StaticResource Text.Small}" Foreground="{StaticResource Brush.Warning}" Text="{Binding Error}" TextWrapping="Wrap" Margin="0,4,0,0"
+               Visibility="{Binding Error, Converter={StaticResource Converter.NullToVisibility}}" />
+  </StackPanel>
+</UserControl>

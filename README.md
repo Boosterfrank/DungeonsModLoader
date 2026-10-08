@@ -116,6 +116,15 @@ recorded in `manifest.json`; loose `Name_P.pak/.ucas/.utoc` files lying directly
 `~mods\Name\` folder first so they can be enabled and disabled. Nothing is deleted. A folder that cannot be read
 yet (still copying, files in use) shows up as "Unmanaged" and is added as soon as it can be read.
 
+**Linking to Nexus Mods**: a hand-installed mod does not know its page on Nexus Mods, so it gets no update notices
+or requirement hints. The first-run wizard (step "Link to Nexus") and the Installed page ("Link to Nexus Mods..." in
+the footer, or "Link to Nexus Mods..." in a row's menu) match local mods with Nexus pages: the display name, folder
+name and pak file names are searched through the public API (no account needed) and scored; the same name is a
+sure match, a name contained in a longer one is offered for you to confirm, weak matches are listed but not
+preselected, and a search box covers the rest. For each linked mod you say which version you have (the newest main
+file is preselected; "not sure" makes the newest file count as an update). Linking only writes the manifest; the
+files are not touched. "Unlink from Nexus Mods" in the row menu turns a mod back into a local one.
+
 ## Profiles
 
 A profile is a named set of enabled mods, stored as `profiles\<name>.json`. The active profile always mirrors the
@@ -154,13 +163,16 @@ second launch forwards the link to the running one.
 Once the app is registered with Nexus Mods (`NexusConstants.AppSlug`), "Log in with Nexus" appears next to the key
 steps. Updates: on startup (at most once an hour) and on demand, installed Nexus mods are compared with the mod's
 file list (author "newer version of" chains, then the newest main file); "Update" replaces the folder in place,
-keeps the name, enabled state and profile membership, and keeps the last two versions in `backups\`. API responses
-and thumbnails are cached under `cache\` with short lifetimes; rate-limit headers are honoured.
+keeps the name, enabled state and profile membership, and keeps the last two versions in `backups\`. Installing a
+newer main file of an installed mod by any other route (the mod page, its Files tab, a download started on the
+website) counts as that update and replaces the mod without asking; only another file of the same mod (an optional
+file, an older version, the same file again) asks whether to replace it or install separately. API responses and
+thumbnails are cached under `cache\` with short lifetimes; rate-limit headers are honoured.
 
 ## Hints and notifications
 
-- **Dependency hints**: a Nexus mod's requirements are recorded when it is installed (and fetched from the public
-  API for mods that have none recorded). When a required mod is not installed or is disabled, the row shows a
+- **Dependency hints**: a Nexus mod's requirements are recorded when it is installed or linked (and fetched from
+  the public API for mods that have none recorded). When a required mod is not installed or is disabled, the row shows a
   "Needs X" badge; clicking it opens the mod on the Browse page, or enables it when it is only disabled.
 - **Conflict hints**: when two *enabled* mods contain `.pak/.ucas/.utoc` files with the same base name, both rows
   show "Conflicts with ..." with the shared names in the tooltip (the game loads only one of them).

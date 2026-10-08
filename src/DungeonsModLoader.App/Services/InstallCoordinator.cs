@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using DungeonsModLoader.App.ViewModels;
 using DungeonsModLoader.Core;
 using DungeonsModLoader.Core.Game;
@@ -43,6 +43,9 @@ public sealed class InstallCoordinator : IInstallCoordinator
 
     /// <summary>"Waiting for Nexus Mods..." toast shown after sending a free account to the website; dismissed when the next flow starts.</summary>
     private ToastViewModel? _waitingToast;
+
+    /// <summary>The website download last started from here, so the nxm:// link it produces can finish the same in-place update.</summary>
+    private PendingWebsiteDownload? _pendingWebsite;
 
     public InstallCoordinator(
         IModInstaller installer,
@@ -317,6 +320,14 @@ public sealed class InstallCoordinator : IInstallCoordinator
 
                     updateOf = existing.Entry.Id;
                 }
+                else if (await IsNewerVersionOfInstalledAsync(existing.Entry, mod, file))
+                {
+                    // An update: replace in place (same folder, name, state and profiles) without asking.
+                    _logger.LogInformation(
+                        "'{Mod}' is installed with file {Old}; {New} ({Version}) is a newer version, updating in place",
+                        existing.Entry.DisplayName, existing.Entry.NexusFileId?.ToString() ?? "unknown", file.FileId, file.Version);
+                    updateOf = existing.Entry.Id;
+                }
                 else
                 {
                     var choice = await _dialogs.ChooseAsync(
@@ -447,7 +458,53 @@ public sealed class InstallCoordinator : IInstallCoordinator
 
         // The file list may lag behind a brand-new upload; the download route only needs the ids.
         file ??= new NexusFile(link.FileId, mod.Name, mod.Version ?? string.Empty, NexusFileCategory.Main, true, 0, null, DateTimeOffset.UtcNow, mod.Version, null, null);
-        await InstallFromNexusCoreAsync(mod, file, link, updateOf: null);
+        await InstallFromNexusCoreAsync(mod, file, link, TakePendingUpdate(link));
+    }
+
+    /// <summary>
+    /// When this link is the download the user was sent to the website for, the in-place update it was started
+    /// for; otherwise null (the normal install rules decide). Links for other mods leave the pending download alone.
+    /// </summary>
+    private Guid? TakePendingUpdate(NxmLink link)
+    {
+        var pending = _pendingWebsite;
+        if (pending is null || pending.ModId != link.ModId)
+        {
+            return null;
+        }
+
+        _pendingWebsite = null;
+        if (pending.UpdateOf is { } updateOf && pending.FileId == link.FileId && _mods.Find(updateOf) is not null)
+        {
+            _logger.LogInformation("nxm link for mod {Mod} file {File} finishes the pending update of {Target}", link.ModId, link.FileId, updateOf);
+            return updateOf;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when <paramref name="file"/> is a newer version of what <paramref name="installed"/> has (the pending
+    /// update found by the checker, or the resolver's verdict on the mod's file list), so it can replace the mod in
+    /// place without asking. Other files of the mod (optional files, older versions) still ask.
+    /// </summary>
+    private async Task<bool> IsNewerVersionOfInstalledAsync(ModEntry installed, NexusMod mod, NexusFile file)
+    {
+        if (_updates.Updates.TryGetValue(installed.Id, out var pending) && pending.NewFile.FileId == file.FileId)
+        {
+            return true;
+        }
+
+        try
+        {
+            var files = await _client.GetFilesAsync(mod.ModId);
+            return UpdateResolver.IsNewerVersion(installed.NexusFileId, file, files);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug("File list of mod {Mod} could not be read to tell an update from a reinstall: {Message}", mod.ModId, ex.Message);
+            return false;
+        }
     }
 
     /// <summary>Resolves the download location, downloads with progress, then runs the normal install flow.</summary>
@@ -464,7 +521,7 @@ public sealed class InstallCoordinator : IInstallCoordinator
         // the token the website puts into its nxm:// links.
         if (link is null && !_session.IsPremium && !mod.DirectDownloadEnabled)
         {
-            return await SendToWebsiteAsync(mod, file);
+            return await SendToWebsiteAsync(mod, file, updateOf);
         }
 
         IReadOnlyList<NexusDownloadLink> links;
@@ -481,7 +538,7 @@ public sealed class InstallCoordinator : IInstallCoordinator
         }
         catch (NexusPremiumRequiredException)
         {
-            return await SendToWebsiteAsync(mod, file);
+            return await SendToWebsiteAsync(mod, file, updateOf);
         }
         catch (NexusException ex)
         {
@@ -548,9 +605,9 @@ public sealed class InstallCoordinator : IInstallCoordinator
     /// the two clicks on the website, open the file's download page and show a "waiting" toast. The install itself
     /// continues when the browser hands the <c>nxm://</c> link to <see cref="HandleNxmLinkAsync"/>.
     /// </summary>
-    private async Task<ModEntry?> SendToWebsiteAsync(NexusMod mod, NexusFile file)
+    private async Task<ModEntry?> SendToWebsiteAsync(NexusMod mod, NexusFile file, Guid? updateOf)
     {
-        _logger.LogInformation("Free account: sending the user to the website for mod {Mod} file {File}", mod.ModId, file.FileId);
+        _logger.LogInformation("Free account: sending the user to the website for mod {Mod} file {File} (update of {Target})", mod.ModId, file.FileId, updateOf?.ToString() ?? "none");
         if (!await EnsureNxmHandlerAsync())
         {
             return null;
@@ -573,10 +630,14 @@ public sealed class InstallCoordinator : IInstallCoordinator
         }
 
         var url = mod.DownloadPageUrl(file.FileId);
+        _pendingWebsite = new PendingWebsiteDownload(mod.ModId, file.FileId, updateOf);
         _windows.OpenUrl(url);
-        ShowWaitingToast(file, url);
+        ShowWaitingToast(file, url, updateOf is not null);
         return null;
     }
+
+    /// <summary>A download handed to the website; the nxm:// link that comes back is matched against it.</summary>
+    private sealed record PendingWebsiteDownload(long ModId, long FileId, Guid? UpdateOf);
 
     /// <summary>
     /// The website can only hand files to the app registered for <c>nxm://</c> links. When that is not this app
@@ -619,11 +680,11 @@ public sealed class InstallCoordinator : IInstallCoordinator
         }
     }
 
-    private void ShowWaitingToast(NexusFile file, string url)
+    private void ShowWaitingToast(NexusFile file, string url, bool isUpdate)
     {
         DismissWaitingToast();
         _waitingToast = _toasts.Show(
-            $"Click \"Slow download\" on the Nexus Mods page that opened. \"{file.Name}\" then installs here on its own.",
+            $"Click \"Slow download\" on the Nexus Mods page that opened. \"{file.Name}\" then {(isUpdate ? "updates the mod" : "installs")} here on its own.",
             ToastKind.Info,
             "Waiting for Nexus Mods...",
             Timeout.InfiniteTimeSpan,

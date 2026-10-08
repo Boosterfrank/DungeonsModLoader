@@ -1,8 +1,9 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DungeonsModLoader.App.Services;
+using DungeonsModLoader.App.ViewModels.Dialogs;
 using DungeonsModLoader.App.ViewModels.Pages;
 using DungeonsModLoader.Core;
 using DungeonsModLoader.Core.Game;
@@ -18,7 +19,8 @@ namespace DungeonsModLoader.App.ViewModels.Setup;
 
 /// <summary>
 /// First-run setup wizard: 1. find the game, 2. show the mods already in <c>~mods</c> (added automatically),
-/// 3. optional Nexus Mods account, 4. done. The window shows this modally; <see cref="CloseRequested"/> carries
+/// 3. link those mods to their Nexus Mods pages (skipped when there are none), 4. optional Nexus Mods account,
+/// 5. done. The window shows this modally; <see cref="CloseRequested"/> carries
 /// the dialog result (true = finished, false = cancelled; the app cannot run without a game folder, so cancelling
 /// closes the app).
 /// </summary>
@@ -47,6 +49,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         IDialogService dialogs,
         INexusSession nexus,
         INexusConnectPrompt connect,
+        LinkModsViewModel linkMods,
         AppPaths paths,
         ILogger<SetupViewModel> logger)
     {
@@ -60,11 +63,14 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         _connect = connect;
         _paths = paths;
         _logger = logger;
+        LinkMods = linkMods;
+        LinkMods.PropertyChanged += OnLinkModsPropertyChanged;
 
         Steps =
         [
             new SetupStepItem(SetupStep.GameFolder, "Game folder"),
             new SetupStepItem(SetupStep.ExistingMods, "Existing mods"),
+            new SetupStepItem(SetupStep.LinkMods, "Link to Nexus"),
             new SetupStepItem(SetupStep.Nexus, "Nexus Mods"),
             new SetupStepItem(SetupStep.Done, "Done"),
         ];
@@ -86,8 +92,23 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     /// <summary>Mods that were already in the mod folders and have been added to the list (step 2).</summary>
     public ObservableCollection<ExistingModViewModel> ExistingMods { get; } = new();
 
+    /// <summary>Step 3: the existing mods matched with their Nexus Mods pages (same view as the Installed page's dialog).</summary>
+    public LinkModsViewModel LinkMods { get; }
+
+    /// <summary>How many existing mods were linked to Nexus Mods pages during setup (shown on the last step).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsGameFolderStep), nameof(IsExistingModsStep), nameof(IsNexusStep), nameof(IsDoneStep))]
+    [NotifyPropertyChangedFor(nameof(LinkSummary))]
+    private int _linkedCount;
+
+    public string LinkSummary => LinkedCount switch
+    {
+        0 => "No mods linked to Nexus Mods pages (you can do this later from the Installed page).",
+        1 => "1 mod linked to its Nexus Mods page.",
+        var n => $"{n} mods linked to their Nexus Mods pages.",
+    };
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsGameFolderStep), nameof(IsExistingModsStep), nameof(IsLinkModsStep), nameof(IsNexusStep), nameof(IsDoneStep))]
     [NotifyPropertyChangedFor(nameof(StepTitle), nameof(StepDescription), nameof(NextText), nameof(ShowBack), nameof(ShowCancel))]
     [NotifyCanExecuteChangedFor(nameof(NextCommand), nameof(BackCommand))]
     private SetupStep _currentStep = SetupStep.GameFolder;
@@ -132,6 +153,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
 
     public bool IsGameFolderStep => CurrentStep == SetupStep.GameFolder;
     public bool IsExistingModsStep => CurrentStep == SetupStep.ExistingMods;
+    public bool IsLinkModsStep => CurrentStep == SetupStep.LinkMods;
     public bool IsNexusStep => CurrentStep == SetupStep.Nexus;
     public bool IsDoneStep => CurrentStep == SetupStep.Done;
 
@@ -145,6 +167,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     {
         SetupStep.GameFolder => "Find your game",
         SetupStep.ExistingMods => "Existing mods",
+        SetupStep.LinkMods => "Link your mods to Nexus Mods",
         SetupStep.Nexus => "Nexus Mods account",
         _ => "All set",
     };
@@ -153,6 +176,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     {
         SetupStep.GameFolder => $"We'll look for {AppInfo.GameDisplayName} on this PC. Pick the install you want to manage mods for.",
         SetupStep.ExistingMods => "Mods that were already in ~mods have been added to your list automatically. Nothing was moved or deleted.",
+        SetupStep.LinkMods => "Your existing mods were matched with pages on Nexus Mods by name. Check each pick and the installed version, or leave a mod unlinked. Linked mods get update notices and requirement hints; the files are not touched.",
         SetupStep.Nexus => "Optional: connect your Nexus Mods account to download mods from the Browse page and get update notices. You can skip this and connect later from Settings or the Browse page.",
         _ => $"{AppInfo.DisplayName} is ready. Here's what was set up.",
     };
@@ -160,6 +184,8 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     public string NextText => CurrentStep switch
     {
         SetupStep.Done => "Finish",
+        SetupStep.LinkMods when !LinkMods.HasSelection => "Skip for now",
+        SetupStep.LinkMods => LinkMods.LinkButtonText + " and continue",
         SetupStep.Nexus when !IsNexusConnected => "Skip for now",
         _ => "Next",
     };
@@ -264,6 +290,20 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
                 break;
 
             case SetupStep.ExistingMods:
+                if (StartLinking())
+                {
+                    CurrentStep = SetupStep.LinkMods;
+                }
+                else
+                {
+                    NexusUserName = _nexus.User?.Name;
+                    CurrentStep = SetupStep.Nexus;
+                }
+
+                break;
+
+            case SetupStep.LinkMods:
+                await ApplyLinksAsync();
                 NexusUserName = _nexus.User?.Name;
                 CurrentStep = SetupStep.Nexus;
                 break;
@@ -294,9 +334,22 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
                 CurrentStep = SetupStep.GameFolder;
                 break;
 
-            case SetupStep.Nexus:
+            case SetupStep.LinkMods:
                 LoadExistingMods();
                 CurrentStep = SetupStep.ExistingMods;
+                break;
+
+            case SetupStep.Nexus:
+                if (LinkMods.HasRows)
+                {
+                    CurrentStep = SetupStep.LinkMods;
+                }
+                else
+                {
+                    LoadExistingMods();
+                    CurrentStep = SetupStep.ExistingMods;
+                }
+
                 break;
 
             case SetupStep.Done:
@@ -516,7 +569,60 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     }
 
     // ------------------------------------------------------------------------------------------------------
-    // Step 3: Nexus Mods account (optional)
+    // Step 3: link the existing mods to their Nexus Mods pages (only when there are local mods)
+    // ------------------------------------------------------------------------------------------------------
+
+    /// <summary>Fills the linking step with the local mods and starts the searches; false when there is nothing to link.</summary>
+    private bool StartLinking()
+    {
+        var local = _mods.Mods.Where(m => m.Entry.Source == ModSource.Local && !m.IsMissing).ToList();
+        if (local.Count == 0)
+        {
+            _logger.LogInformation("Setup: no local mods, linking step skipped");
+            return false;
+        }
+
+        if (!LinkMods.HasRows)
+        {
+            LinkMods.Load(local);
+        }
+
+        return true;
+    }
+
+    private async Task ApplyLinksAsync()
+    {
+        if (!LinkMods.HasSelection)
+        {
+            _logger.LogInformation("Setup: linking step skipped with no picks");
+            return;
+        }
+
+        IsBusy = true;
+        BusyText = "Linking mods to Nexus Mods...";
+        try
+        {
+            var linked = await LinkMods.ApplyAsync();
+            LinkedCount = LinkMods.LinkedCount;
+            _logger.LogInformation("Setup linked {Linked} mod(s) to Nexus Mods pages", linked);
+        }
+        finally
+        {
+            IsBusy = false;
+            BusyText = null;
+        }
+    }
+
+    private void OnLinkModsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(LinkModsViewModel.SelectedCount) or nameof(LinkModsViewModel.LinkButtonText) or nameof(LinkModsViewModel.HasSelection))
+        {
+            OnPropertyChanged(nameof(NextText));
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------
+    // Step 4: Nexus Mods account (optional)
     // ------------------------------------------------------------------------------------------------------
 
     public string NexusKeyInfo => SettingsViewModel.NexusKeyInfo;
@@ -588,7 +694,7 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
     }
 
     // ------------------------------------------------------------------------------------------------------
-    // Step 4: finish
+    // Step 5: finish
     // ------------------------------------------------------------------------------------------------------
 
     private async Task FinishAsync()
@@ -599,8 +705,8 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         {
             _settings.Current.FirstRunCompleted = true;
             await _settings.SaveAsync(_lifetime.Token);
-            _logger.LogInformation("First-run setup completed for {Root} ({Source}); {Found} existing mod(s); Nexus connected: {Nexus}",
-                _settings.Current.GameRootPath, _settings.Current.GameSource, FoundCount, IsNexusConnected);
+            _logger.LogInformation("First-run setup completed for {Root} ({Source}); {Found} existing mod(s), {Linked} linked to Nexus; Nexus connected: {Nexus}",
+                _settings.Current.GameRootPath, _settings.Current.GameSource, FoundCount, LinkedCount, IsNexusConnected);
             RequestClose(true);
         }
         catch (OperationCanceledException)
@@ -653,6 +759,8 @@ public sealed partial class SetupViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
+        LinkMods.PropertyChanged -= OnLinkModsPropertyChanged;
+        LinkMods.Dispose();
         // Cancel only: background summary tasks may still touch the token after the window is gone.
         _lifetime.Cancel();
     }

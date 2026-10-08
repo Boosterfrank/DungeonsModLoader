@@ -1,4 +1,4 @@
-namespace DungeonsModLoader.Core.Mods;
+﻿namespace DungeonsModLoader.Core.Mods;
 
 /// <summary>Result of comparing the manifest with the folders on disk.</summary>
 /// <param name="UnmanagedFolders">Folder names inside <c>~mods</c> that no manifest entry owns and that could not be adopted.</param>
@@ -91,6 +91,16 @@ public interface IModService
     IDisposable ReserveFolderName(string folderName);
 
     Task RenameAsync(Guid modId, string displayName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records that a mod (typically one found in <c>~mods</c> and adopted as local) is the one on a Nexus Mods
+    /// page: source, mod id, installed file and version when known, author, picture and requirements. Update
+    /// checks and dependency hints then cover it. Nothing on disk changes.
+    /// </summary>
+    Task LinkToNexusAsync(Guid modId, NexusLink link, CancellationToken cancellationToken = default);
+
+    /// <summary>Makes a Nexus mod a local mod again (drops the Nexus ids, author, picture and requirements; the files stay).</summary>
+    Task UnlinkFromNexusAsync(Guid modId, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes the mod folder (wherever it currently is) and removes the manifest entry. For a missing mod only the entry is removed.</summary>
     Task UninstallAsync(Guid modId, CancellationToken cancellationToken = default);

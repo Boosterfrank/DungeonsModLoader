@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using DungeonsModLoader.Core.Mods;
 using DungeonsModLoader.Core.Settings;
 using DungeonsModLoader.Nexus.Api;
@@ -169,7 +169,12 @@ public sealed class ModUpdateChecker : IModUpdateChecker, IDisposable
         var nexusModId = entry.NexusModId!.Value;
 
         bool worthFetchingFiles;
-        if (recentlyUpdated.TryGetValue(nexusModId, out var recent))
+        if (entry.NexusFileId is null)
+        {
+            // Linked to its page without a known version: only the file list can say whether the main file is newer.
+            worthFetchingFiles = true;
+        }
+        else if (recentlyUpdated.TryGetValue(nexusModId, out var recent))
         {
             worthFetchingFiles = recent.LatestFileUpdate > entry.UpdatedAt.AddMinutes(-1) || force;
         }

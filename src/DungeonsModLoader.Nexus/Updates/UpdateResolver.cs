@@ -1,4 +1,4 @@
-using DungeonsModLoader.Nexus.Api;
+﻿using DungeonsModLoader.Nexus.Api;
 
 namespace DungeonsModLoader.Nexus.Updates;
 
@@ -15,7 +15,8 @@ public static class UpdateResolver
         ArgumentNullException.ThrowIfNull(files);
         if (installedFileId is null)
         {
-            return null;
+            // Linked to its page without knowing the installed version: the current main file is the one to have.
+            return NewestMain(files);
         }
 
         var byId = new Dictionary<long, NexusFile>();
@@ -47,11 +48,7 @@ public static class UpdateResolver
         }
 
         // 2. No chain: compare with the newest MAIN file.
-        var newestMain = files.Files
-            .Where(f => f.Category == NexusFileCategory.Main && f.IsDownloadable)
-            .OrderByDescending(f => f.UploadedAt)
-            .ThenByDescending(f => f.FileId)
-            .FirstOrDefault();
+        var newestMain = NewestMain(files);
         if (newestMain is null || newestMain.FileId == installedFileId.Value)
         {
             return null;
@@ -63,7 +60,51 @@ public static class UpdateResolver
             return newestMain;
         }
 
-        var replaceable = installed.Category is NexusFileCategory.Main or NexusFileCategory.Update or NexusFileCategory.OldVersion or NexusFileCategory.Removed or NexusFileCategory.Archived;
-        return replaceable && newestMain.UploadedAt > installed.UploadedAt ? newestMain : null;
+        return IsReplaceable(installed) && newestMain.UploadedAt > installed.UploadedAt ? newestMain : null;
     }
+
+    /// <summary>
+    /// True when installing <paramref name="candidate"/> over the installed file is an update of the same mod
+    /// rather than another flavour of it: the file the author marked as its successor, a main file uploaded after
+    /// the installed one, or any main file when the installed version is unknown (a mod linked by hand) or no
+    /// longer listed. Optional and miscellaneous files never count, so installing them still asks.
+    /// </summary>
+    public static bool IsNewerVersion(long? installedFileId, NexusFile candidate, NexusFileList files)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(files);
+        if (!candidate.IsDownloadable || candidate.FileId == installedFileId)
+        {
+            return false;
+        }
+
+        if (installedFileId is null)
+        {
+            return candidate.Category == NexusFileCategory.Main;
+        }
+
+        if (FindNewerFile(installedFileId, files)?.FileId == candidate.FileId)
+        {
+            return true;
+        }
+
+        if (candidate.Category != NexusFileCategory.Main)
+        {
+            return false;
+        }
+
+        var installed = files.Files.FirstOrDefault(f => f.FileId == installedFileId.Value);
+        return installed is null || (IsReplaceable(installed) && candidate.UploadedAt > installed.UploadedAt);
+    }
+
+    private static NexusFile? NewestMain(NexusFileList files) =>
+        files.Files
+            .Where(f => f.Category == NexusFileCategory.Main && f.IsDownloadable)
+            .OrderByDescending(f => f.UploadedAt)
+            .ThenByDescending(f => f.FileId)
+            .FirstOrDefault();
+
+    /// <summary>Files that a newer main file supersedes (optional and miscellaneous files live beside the main one).</summary>
+    private static bool IsReplaceable(NexusFile installed) =>
+        installed.Category is NexusFileCategory.Main or NexusFileCategory.Update or NexusFileCategory.OldVersion or NexusFileCategory.Removed or NexusFileCategory.Archived;
 }

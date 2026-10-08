@@ -1,4 +1,4 @@
-using DungeonsModLoader.Nexus;
+﻿using DungeonsModLoader.Nexus;
 using DungeonsModLoader.Nexus.Api;
 using DungeonsModLoader.Nexus.Nxm;
 using DungeonsModLoader.Nexus.Text;
@@ -163,7 +163,26 @@ public class UpdateResolverTests
         Assert.Equal(2, UpdateResolver.FindNewerFile(1, files)!.FileId);
         Assert.Null(UpdateResolver.FindNewerFile(9, files));
         Assert.Null(UpdateResolver.FindNewerFile(2, files));
-        Assert.Null(UpdateResolver.FindNewerFile(null, files));
+        // Linked without a known version: the newest main file is the one to have.
+        Assert.Equal(2, UpdateResolver.FindNewerFile(null, files)!.FileId);
+    }
+
+    [Fact]
+    public void A_newer_main_file_counts_as_an_update_but_optional_and_older_files_do_not()
+    {
+        var files = new NexusFileList(
+            new[] { File(1, NexusFileCategory.OldVersion, 1), File(2, NexusFileCategory.Main, 5), File(3, NexusFileCategory.Main, 7), File(9, NexusFileCategory.Optional, 8) },
+            new[] { new NexusFileUpdate(1, 2, null, null, DateTimeOffset.UtcNow) });
+
+        Assert.True(UpdateResolver.IsNewerVersion(1, files.Files[1], files));   // the successor the author marked
+        Assert.True(UpdateResolver.IsNewerVersion(1, files.Files[2], files));   // a later main file
+        Assert.True(UpdateResolver.IsNewerVersion(2, files.Files[2], files));
+        Assert.False(UpdateResolver.IsNewerVersion(3, files.Files[1], files));  // older main file: a downgrade, ask
+        Assert.False(UpdateResolver.IsNewerVersion(2, files.Files[3], files));  // optional file: another flavour, ask
+        Assert.False(UpdateResolver.IsNewerVersion(2, files.Files[1], files));  // same file: a reinstall, ask
+        Assert.True(UpdateResolver.IsNewerVersion(null, files.Files[1], files)); // unknown version: any main file
+        Assert.False(UpdateResolver.IsNewerVersion(null, files.Files[3], files));
+        Assert.True(UpdateResolver.IsNewerVersion(42, files.Files[2], files));  // installed file no longer listed
     }
 
     [Fact]

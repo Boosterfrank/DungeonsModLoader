@@ -1,10 +1,13 @@
-namespace DungeonsModLoader.App.ViewModels.Setup;
+﻿namespace DungeonsModLoader.App.ViewModels.Setup;
 
 /// <summary>The pages of the first-run setup wizard, in order.</summary>
 public enum SetupStep
 {
     GameFolder = 0,
     ExistingMods = 1,
-    Nexus = 2,
-    Done = 3,
+
+    /// <summary>Match the mods found in ~mods with their Nexus Mods pages (skipped when there are none).</summary>
+    LinkMods = 2,
+    Nexus = 3,
+    Done = 4,
 }

@@ -1,4 +1,4 @@
-using System.Net.Http;
+﻿using System.Net.Http;
 using DungeonsModLoader.App.Services;
 using DungeonsModLoader.App.ViewModels;
 using DungeonsModLoader.App.ViewModels.Pages;
@@ -41,6 +41,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IToastService, ToastService>();
         services.AddSingleton<IAppNavigator, AppNavigator>();
         services.AddSingleton<INexusConnectPrompt, NexusConnectPrompt>();
+        services.AddSingleton<ILinkModsPrompt, LinkModsPrompt>();
 
         // App self-update: GitHub Releases of the repository in AppInfo.GitHubRepository.
         services.AddSingleton<IGitHubReleaseClient>(provider => new GitHubReleaseClient(
@@ -76,6 +77,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<ImagePreviewViewModel>();
         services.AddTransient<ViewModels.Dialogs.NexusConnectViewModel>();
+        services.AddTransient<ViewModels.Dialogs.LinkModsViewModel>();
         return services;
     }
 

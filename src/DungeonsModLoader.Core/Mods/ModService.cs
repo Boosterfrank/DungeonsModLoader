@@ -1,4 +1,4 @@
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using DungeonsModLoader.Core.Game;
 using DungeonsModLoader.Core.Install;
 using Microsoft.Extensions.Logging;
@@ -603,6 +603,94 @@ public sealed class ModService : IModService, IDisposable
         }
 
         RaiseChanged();
+    }
+
+    public async Task LinkToNexusAsync(Guid modId, NexusLink link, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+        if (link.NexusModId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(link), "The Nexus mod id must be positive.");
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var installation = RequireInstallation();
+            var entry = RequireEntry(modId);
+            var previous = SourceSnapshot.Of(entry);
+            _logger.LogInformation(
+                "Linking '{Mod}' to Nexus mod {NexusId} (file {File}, version {Version})",
+                entry.DisplayName, link.NexusModId, link.NexusFileId?.ToString() ?? "unknown", link.Version ?? entry.Version ?? "unknown");
+
+            entry.Source = ModSource.Nexus;
+            entry.NexusModId = link.NexusModId;
+            entry.NexusFileId = link.NexusFileId;
+            entry.Version = link.Version ?? entry.Version;
+            entry.Author = link.Author ?? entry.Author;
+            entry.ThumbnailUrl = link.ThumbnailUrl ?? entry.ThumbnailUrl;
+            entry.Requirements = link.Requirements?.ToList() ?? entry.Requirements;
+            entry.UpdatedAt = link.FileUploadedAt ?? DateTimeOffset.UtcNow;
+            await SaveManifestOrRevertAsync(() => previous.Restore(entry), installation, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        RaiseChanged();
+    }
+
+    public async Task UnlinkFromNexusAsync(Guid modId, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var installation = RequireInstallation();
+            var entry = RequireEntry(modId);
+            if (entry.Source == ModSource.Local && entry.NexusModId is null)
+            {
+                return;
+            }
+
+            var previous = SourceSnapshot.Of(entry);
+            _logger.LogInformation("Unlinking '{Mod}' from Nexus mod {NexusId}", entry.DisplayName, entry.NexusModId);
+            entry.Source = ModSource.Local;
+            entry.NexusModId = null;
+            entry.NexusFileId = null;
+            entry.Author = null;
+            entry.ThumbnailUrl = null;
+            entry.Requirements = null;
+            entry.UpdatedAt = DateTimeOffset.UtcNow;
+            await SaveManifestOrRevertAsync(() => previous.Restore(entry), installation, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        RaiseChanged();
+    }
+
+    /// <summary>The source fields of an entry, so a failed manifest save can put them back.</summary>
+    private sealed record SourceSnapshot(
+        ModSource Source, long? NexusModId, long? NexusFileId, string? Version, string? Author, string? ThumbnailUrl,
+        List<ModRequirementRecord>? Requirements, DateTimeOffset UpdatedAt)
+    {
+        public static SourceSnapshot Of(ModEntry entry) =>
+            new(entry.Source, entry.NexusModId, entry.NexusFileId, entry.Version, entry.Author, entry.ThumbnailUrl, entry.Requirements, entry.UpdatedAt);
+
+        public void Restore(ModEntry entry)
+        {
+            entry.Source = Source;
+            entry.NexusModId = NexusModId;
+            entry.NexusFileId = NexusFileId;
+            entry.Version = Version;
+            entry.Author = Author;
+            entry.ThumbnailUrl = ThumbnailUrl;
+            entry.Requirements = Requirements;
+            entry.UpdatedAt = UpdatedAt;
+        }
     }
 
     public async Task UninstallAsync(Guid modId, CancellationToken cancellationToken = default)

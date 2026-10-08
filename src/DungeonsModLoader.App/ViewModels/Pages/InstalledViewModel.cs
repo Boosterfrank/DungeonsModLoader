@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -57,6 +57,7 @@ public sealed partial class InstalledViewModel : PageViewModel
     private readonly INexusApiClient _client;
     private readonly IAppNavigator _navigator;
     private readonly IToastService _toasts;
+    private readonly ILinkModsPrompt _linkPrompt;
     private readonly ILogger<InstalledViewModel> _logger;
 
     /// <summary>Every known row by <see cref="ModRowViewModel.Key"/>, so refreshes reuse instances.</summary>
@@ -90,6 +91,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         INexusApiClient client,
         IAppNavigator navigator,
         IToastService toasts,
+        ILinkModsPrompt linkPrompt,
         ILogger<InstalledViewModel> logger)
     {
         _mods = mods;
@@ -108,6 +110,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         _client = client;
         _navigator = navigator;
         _toasts = toasts;
+        _linkPrompt = linkPrompt;
         _logger = logger;
 
         _isGameRunning = _monitor.IsGameRunning;
@@ -395,6 +398,11 @@ public sealed partial class InstalledViewModel : PageViewModel
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(CheckForUpdatesCommand))]
     private bool _hasNexusRows;
+
+    /// <summary>At least one managed mod is local (installed by hand), so it can be linked to its Nexus Mods page.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(LinkLocalModsCommand))]
+    private bool _hasLocalRows;
 
     private bool CanCheckForUpdates() => CanMutate && HasNexusRows;
 
@@ -702,6 +710,79 @@ public sealed partial class InstalledViewModel : PageViewModel
     }
 
     private bool CanRename(ModRowViewModel? row) => CanMutate && row is { IsManaged: true };
+
+    private bool CanLinkLocalMods() => CanMutate && HasLocalRows;
+
+    /// <summary>"Link to Nexus Mods...": matches every local mod with its page on Nexus Mods (update checks and hints then cover them).</summary>
+    [RelayCommand(CanExecute = nameof(CanLinkLocalMods))]
+    private Task LinkLocalModsAsync() =>
+        LinkModsAsync(_mods.Mods.Where(m => m.Entry.Source == ModSource.Local && !m.IsMissing).ToList());
+
+    private bool CanLink(ModRowViewModel? row) => CanMutate && row is { IsManaged: true, IsLocal: true, IsMissing: false };
+
+    /// <summary>Row menu: link this one mod.</summary>
+    [RelayCommand(CanExecute = nameof(CanLink))]
+    private Task LinkAsync(ModRowViewModel? row) =>
+        row is null || _mods.Find(row.Id) is not { } info ? Task.CompletedTask : LinkModsAsync(new[] { info });
+
+    private async Task LinkModsAsync(IReadOnlyList<ModInfo> mods)
+    {
+        if (mods.Count == 0 || !await EnsureCanMutateAsync())
+        {
+            return;
+        }
+
+        var linked = await _linkPrompt.ShowAsync(mods);
+        if (linked == 0)
+        {
+            return;
+        }
+
+        _toasts.Show(
+            linked == 1 ? "1 mod is now linked to its Nexus Mods page." : $"{linked} mods are now linked to their Nexus Mods pages.",
+            ToastKind.Success,
+            "Linked");
+        if (_session.HasApiKey)
+        {
+            _ = CheckUpdatesAfterLinkingAsync();
+        }
+    }
+
+    /// <summary>Linked mods may already have newer files: a quiet check fills in the Update buttons.</summary>
+    private async Task CheckUpdatesAfterLinkingAsync()
+    {
+        try
+        {
+            await _updates.CheckAsync(force: true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug("Update check after linking failed: {Message}", ex.Message);
+        }
+    }
+
+    private bool CanUnlink(ModRowViewModel? row) => CanMutate && row is { IsManaged: true, IsNexus: true };
+
+    /// <summary>Row menu: make a Nexus mod a local one again (wrong link, or a mod the user wants left alone).</summary>
+    [RelayCommand(CanExecute = nameof(CanUnlink))]
+    private async Task UnlinkAsync(ModRowViewModel? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        var confirmed = await _dialogs.ConfirmAsync(
+            "Unlink from Nexus Mods?",
+            $"{row.DisplayName} becomes a local mod: no more update notices or requirement hints for it. The files stay as they are.",
+            "Unlink");
+        if (!confirmed || !await EnsureCanMutateAsync())
+        {
+            return;
+        }
+
+        await RunModOperationAsync("Could not unlink the mod", () => _mods.UnlinkFromNexusAsync(row.Id));
+    }
 
     [RelayCommand(CanExecute = nameof(CanUninstall))]
     private async Task UninstallAsync(ModRowViewModel? row)
@@ -1066,6 +1147,7 @@ public sealed partial class InstalledViewModel : PageViewModel
         EnabledCount = Rows.Count(row => row.IsUnmanaged || (row.IsEnabled && !row.IsMissing));
         HasAnyRows = Rows.Count > 0;
         HasNexusRows = Rows.Any(row => row.IsNexus);
+        HasLocalRows = Rows.Any(row => row.IsLocal && row.IsManaged && !row.IsMissing);
     }
 
     private void ApplyFilter()
